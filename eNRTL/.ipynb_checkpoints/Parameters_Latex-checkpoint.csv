@@ -1,0 +1,13 @@
+Description,Name,Value,Uncertainty,Percent
+Rxn Eq. Const Bicarbonate,A,545.0,8.6,2%
+Rxn Eq. Const Bicarbonate,B,-7587.3,3437.5,-45%
+Rxn Eq. Const Carbamate,A,294.4,21.8,7%
+Rxn Eq. Const Carbamate,B,-340.3,5630.2,-1654%
+eNRTL m-ca,"$A_{H_2O,(MEAH^+, MEACOO^-)}$",2.1,18.0,866%
+eNRTL m-ca,"$B_{H_2O,(MEAH^+, MEACOO^-)}$",5050.7,4635.6,92%
+eNRTL ca-m,"$A_{(MEAH^+, MEACOO^-), H_2O}$",12.4,7.4,60%
+eNRTL ca-m,"$B_{(MEAH^+, MEACOO^-), H_2O}$",-4033.7,1894.1,-47%
+eNRTL m-ca,"$A_{H_2O,(MEAH^+, HCO3^-)}$",-11.6,7.6,-65%
+eNRTL m-ca,"$B_{H_2O,(MEAH^+, HCO3^-)}$",4109.2,2337.8,57%
+eNRTL ca-m,"$A_{(MEAH^+, HCO3^-), H_2O}$",-0.4,2.0,-484%
+eNRTL ca-m,"$B_{(MEAH^+, HCO3^-), H_2O}$",-1672.0,663.3,-40%

@@ -1,6 +1,8 @@
 import numpy as np
 import numdifftools as nd
-from scipy.optimize import root
+from scipy.optimize import root, least_squares
+from gekko import GEKKO
+import pyomo.environ as pyo
 
 
 class PCSAFT:
@@ -28,26 +30,26 @@ class PCSAFT:
     R = 8.314  # J/mol-K
     π = np.pi
 
-    def __init__(self, T, z, m, σ, ϵ_k, k_ij, η=None, phase='liquid', P_sys=None, κ_AB=None, ϵ_AB_k=None):
+    def __init__(model, T, z, m, σ, ϵ_k, k_ij, η=None, phase='liquid', P_sys=None, κ_AB=None, ϵ_AB_k=None):
 
         # Parameters
-        self.T = T
-        self.T_og = T
-        self.z = z
-        self.z_og = z
-        self.m = m
-        self.k = len(σ)
-        self.σ = σ
-        self.ϵ_k = ϵ_k
-        self.κ_AB = κ_AB
-        self.ϵ_AB_k = ϵ_AB_k
-        self.k = len(z)
-        self.η_diff = False
-        self.T_diff = False
-        self.x_diff = False
-        self.d_static = σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
+        model.T = T
+        model.T_og = T
+        model.z = z
+        model.z_og = z
+        model.m = m
+        model.k = len(σ)
+        model.σ = σ
+        model.ϵ_k = ϵ_k
+        model.κ_AB = κ_AB
+        model.ϵ_AB_k = ϵ_AB_k
+        model.k = len(z)
+        model.η_diff = False
+        model.T_diff = False
+        model.x_diff = False
+        model.d_static = σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
 
-        k = self.k
+        k = model.k
 
         if κ_AB is None:
             κ_AB = np.zeros(k)
@@ -57,124 +59,124 @@ class PCSAFT:
 
         # --------------------------------------- Intermediates --------------------------------------- #
 
-        self.σ_ij = np.array([[1 / 2 * (σ[i] + σ[j]) for j in range(k)] for i in range(k)])
-        self.ϵ_ij = np.array([[(ϵ_k[i] * ϵ_k[j]) ** (1 / 2) * (1 - k_ij[i][j]) for j in range(k)] for i in range(k)])
-        self.κ_AB_ij = np.array(
+        model.σ_ij = np.array([[1 / 2 * (σ[i] + σ[j]) for j in range(k)] for i in range(k)])
+        model.ϵ_ij = np.array([[(ϵ_k[i] * ϵ_k[j]) ** (1 / 2) * (1 - k_ij[i][j]) for j in range(k)] for i in range(k)])
+        model.κ_AB_ij = np.array(
             [[(κ_AB[i] * κ_AB[j]) ** (1 / 2) * ((σ[i] * σ[j]) / (1 / 2 * (σ[i] * σ[j]))) ** 3 for j in range(k)] for i
              in range(k)])
-        self.ϵ_AB_ij = np.array([[(ϵ_AB_k[i] + ϵ_AB_k[j]) / 2 for j in range(k)] for i in range(k)])
+        model.ϵ_AB_ij = np.array([[(ϵ_AB_k[i] + ϵ_AB_k[j]) / 2 for j in range(k)] for i in range(k)])
 
         if P_sys is not None:
-            self.P_sys = P_sys
-            self.phase = phase
-            self.find_η()
+            model.P_sys = P_sys
+            model.phase = phase
+            model.find_η()
         elif P_sys is None and η is not None:
-            self.η = η
+            model.η = η
         elif P_sys is None and η is None:
             if phase == 'liquid':
-                self.η = .4
+                model.η = .4
             elif phase == 'vapor':
-                self.η = .01
+                model.η = .01
             print('Warning, a default η had to be defined based on the given phase since so system pressure was given to iteratively find η')
 
-    def m_bar(self):
+    def m_bar(model):
 
-        z = self.z
-        m = self.m
+        z = model.z
+        m = model.m
 
         return sum(z * m)
 
-    def d(self):
-        T = self.T
-        σ = self.σ
-        ϵ_k = self.ϵ_k
+    def d(model):
+        T = model.T
+        σ = model.σ
+        ϵ_k = model.ϵ_k
 
         return σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
 
-    def d_og(self):
-        T = self.T_og
-        σ = self.σ
-        ϵ_k = self.ϵ_k
+    def d_og(model):
+        T = model.T_og
+        σ = model.σ
+        ϵ_k = model.ϵ_k
 
         return σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
 
-    def ρ(self):
+    def ρ(model):
 
-        z = self.z_og
-        η = self.η
-        d = self.d_static
-        m = self.m
-        k = self.k
-        return 6 / self.π * η * (sum([z[i] * m[i] * d[i] ** 3 for i in range(k)])) ** (-1)
+        z = model.z_og
+        η = model.η
+        d = model.d_static
+        m = model.m
+        k = model.k
+        return 6 / model.π * η * (sum([z[i] * m[i] * d[i] ** 3 for i in range(k)])) ** (-1)
 
-    def v(self):
+    def v(model):
 
-        ρ = self.ρ()
-        return self.N_A * 10 ** -30 / ρ
+        ρ = model.ρ()
+        return model.N_A * 10 ** -30 / ρ
 
-    def ξ(self):
+    def ξ(model):
 
-        z = self.z
-        d = self.d()
-        ρ = self.ρ()
-        m = self.m
-        return np.array([self.π / 6 * ρ * np.sum([z[i] * m[i] * d[i] ** n for i in range(self.k)]) for n in range(4)])
+        z = model.z
+        d = model.d()
+        ρ = model.ρ()
+        m = model.m
+        return np.array([model.π / 6 * ρ * np.sum([z[i] * m[i] * d[i] ** n for i in range(model.k)]) for n in range(4)])
 
-    def g_hs_ij(self):
+    def g_hs_ij(model):
 
-        d = self.d()
-        ξ = self.ξ()
+        d = model.d()
+        ξ = model.ξ()
 
         return np.array([[(1 / (1 - ξ[3])) +
                         ((d[i] * d[j] / (d[i] + d[j])) * 3 * ξ[2] / (1 - ξ[3]) ** 2) +
                         ((d[i] * d[j] / (d[i] + d[j])) ** 2 * 2 * ξ[2] ** 2 / (1 - ξ[3]) ** 3)
-                        for j in range(self.k)]
-                        for i in range(self.k)])
+                        for j in range(model.k)]
+                        for i in range(model.k)])
 
-    def d_ij(self):
+    def d_ij(model):
 
-        d = self.d()
-        return np.array([[1 / 2 * (d[i] + d[j]) for j in range(self.k)] for i in range(self.k)])
+        d = model.d()
+        return np.array([[1 / 2 * (d[i] + d[j]) for j in range(model.k)] for i in range(model.k)])
 
-    def Δ_AB_ij(self):
-        T = self.T
-        d_ij = self.d_ij()
-        g_hs_ij = self.g_hs_ij()
-        return np.array([[d_ij[i][j] ** 3 * g_hs_ij[i][j] * self.κ_AB_ij[i][j] * (np.exp(self.ϵ_AB_ij[i][j] / T) - 1)
-                          for j in range(self.k)] for i in range(self.k)])
+    def Δ_AB_ij(model):
+        T = model.T
+        d_ij = model.d_ij()
+        g_hs_ij = model.g_hs_ij()
+        return np.array([[d_ij[i][j] ** 3 * g_hs_ij[i][j] * model.κ_AB_ij[i][j] * (np.exp(model.ϵ_AB_ij[i][j] / T) - 1)
+                          for j in range(model.k)] for i in range(model.k)])
 
-    def a_hs(self):
+    def a_hs(model):
 
-        ξ = self.ξ()
+        ξ = model.ξ()
         return 1 / ξ[0] * (3 * ξ[1] * ξ[2] / (1 - ξ[3]) + ξ[2] ** 3 / (ξ[3] * (1 - ξ[3]) ** 2) + (
                     ξ[2] ** 3 / ξ[3] ** 2 - ξ[0]) * np.log(1 - ξ[3]))
 
-    def a_hc(self):
-        z = self.z
+    def a_hc(model):
+        z = model.z
 
-        k = self.k
-        m = self.m
-        m_bar = self.m_bar()
-        g_hs_ij = self.g_hs_ij()
-        a_hs = self.a_hs()
+        k = model.k
+        m = model.m
+        m_bar = model.m_bar()
+        g_hs_ij = model.g_hs_ij()
+        a_hs = model.a_hs()
 
         return m_bar * a_hs - sum([z[i] * (m[i] - 1) * np.log(g_hs_ij[i][i]) for i in range(k)])
 
-    def a_disp(self):
+    def a_disp(model):
 
-        T = self.T
-        z = self.z
-        η = self.ξ()[-1]
+        T = model.T
+        z = model.z
+        η = model.ξ()[-1]
 
-        a_ni = self.a_ni
-        b_ni = self.b_ni
-        π = self.π
-        k = self.k
-        ρ = self.ρ()
-        m = self.m
-        m̄ = self.m_bar()
-        ϵ_ij = self.ϵ_ij
-        σ_ij = self.σ_ij
+        a_ni = model.a_ni
+        b_ni = model.b_ni
+        π = model.π
+        k = model.k
+        ρ = model.ρ()
+        m = model.m
+        m̄ = model.m_bar()
+        ϵ_ij = model.ϵ_ij
+        σ_ij = model.σ_ij
 
         a = a_ni[0] + (m̄ - 1) / m̄ * a_ni[1] + (m̄ - 1) / m̄ * (m̄ - 2) / m̄ * a_ni[2]
         b = b_ni[0] + (m̄ - 1) / m̄ * b_ni[1] + (m̄ - 1) / m̄ * (m̄ - 2) / m̄ * b_ni[2]
@@ -206,13 +208,13 @@ class PCSAFT:
 
         return -2 * π * ρ * I1 * Σ_1 - π * ρ * m̄ * C1 * I2 * Σ_2
 
-    def a_assoc(self):
+    def a_assoc(model):
 
-        z = self.z
-        k = self.k
-        ρ = self.ρ()
-        ϵ_AB_k = self.ϵ_AB_k
-        Δ_AB_ij = self.Δ_AB_ij()
+        z = model.z
+        k = model.k
+        ρ = model.ρ()
+        ϵ_AB_k = model.ϵ_AB_k
+        Δ_AB_ij = model.Δ_AB_ij()
 
         def XA_find(XA_guess, n, Δ_AB_ij, ρ, z):
             # m = int(XA_guess.shape[1] / n)
@@ -248,36 +250,36 @@ class PCSAFT:
 
         return sum([z[i] * sum([np.log(XA[j] - 1 / 2 * XA[j] + 1 / 2) for j in range(len(XA))]) for i in range(k)])
 
-    def a_ion(self):
+    def a_ion(model):
         return 0
 
-    def a_res(self):
+    def a_res(model):
 
-        a_hc = self.a_hc()
-        a_disp = self.a_disp()
-        a_assoc = self.a_assoc()
-        a_ion = self.a_ion()
+        a_hc = model.a_hc()
+        a_disp = model.a_disp()
+        a_assoc = model.a_assoc()
+        a_ion = model.a_ion()
 
         return a_hc + a_disp + a_assoc + a_ion
 
-    def da_dη(self):
+    def da_dη(model):
 
-        η = self.η
+        η = model.η
 
-        self.η_og = self.η
+        model.η_og = model.η
 
         def f(η_diff):
-            self.η = η_diff
-            return self.a_res()
+            model.η = η_diff
+            return model.a_res()
 
-        self.η = self.η_og
+        model.η = model.η_og
 
         return nd.Derivative(f)(η)
 
-    def da_dx(self):
+    def da_dx(model):
 
-        z = self.z
-        self.z_og = self.z
+        z = model.z
+        model.z_og = model.z
         da_dx = []
         for k in range(len(z)):
 
@@ -290,58 +292,58 @@ class PCSAFT:
                     else:
                         z_new.append(z[i])
 
-                self.z = z_new
+                model.z = z_new
 
-                return self.a_res()
+                return model.a_res()
 
 
-            self.z = self.z_og
+            model.z = model.z_og
 
             da_dx.append(nd.Derivative(f)(z[k]))
 
-        self.z = self.z_og
+        model.z = model.z_og
 
         return np.array(da_dx)
 
-    def da_dT(self):
+    def da_dT(model):
 
-        T = self.T
-        self.T_og = self.T
+        T = model.T
+        model.T_og = model.T
 
         def f(T_diff):
-            self.T = T_diff
-            return self.a_res()
+            model.T = T_diff
+            return model.a_res()
 
-        self.T = self.T_og
+        model.T = model.T_og
         return nd.Derivative(f)(T)
 
-    def Z(self):
-        η = self.η
+    def Z(model):
+        η = model.η
 
-        da_dη = self.da_dη()
+        da_dη = model.da_dη()
 
-        self.η = self.η_og
+        model.η = model.η_og
 
         return 1 + η * da_dη
 
-    def P(self):
+    def P(model):
 
-        T = self.T
-        Z = self.Z()
-        ρ = self.ρ()
-        kb = self.kb
+        T = model.T
+        Z = model.Z()
+        ρ = model.ρ()
+        kb = model.kb
 
         return Z*kb*T*ρ*10**30
 
-    def find_η(self):
+    def find_η(model):
 
         def f(ηg):
-            self.η = float(ηg)
-            P = self.P()
-            P_sys = self.P_sys
+            model.η = float(ηg)
+            P = model.P()
+            P_sys = model.P_sys
             return (P - P_sys)/100000
 
-        phase = self.phase
+        phase = model.phase
         if phase == 'liquid':
             ηg = .5
         elif phase == 'vapor':
@@ -351,60 +353,60 @@ class PCSAFT:
             ηg = .01
         η = root(f, np.array([ηg])).x[0]
 
-        self.η = η
+        model.η = η
 
-    def h_res(self):
+    def h_res(model):
 
-        T = self.T
-        self.T_og = self.T
+        T = model.T
+        model.T_og = model.T
 
-        Z = self.Z()
-        da_dT = self.da_dT()
+        Z = model.Z()
+        da_dT = model.da_dT()
 
-        self.T = self.T_og
+        model.T = model.T_og
 
         return -T * da_dT + (Z - 1)
 
-    def s_res(self):
+    def s_res(model):
 
-        T = self.T
-        self.T_og = self.T
+        T = model.T
+        model.T_og = model.T
 
-        a_res = self.a_res()
-        Z = self.Z()
-        da_dT = self.da_dT()
+        a_res = model.a_res()
+        Z = model.Z()
+        da_dT = model.da_dT()
 
-        self.T = self.T_og
+        model.T = model.T_og
 
         return -T * (da_dT + a_res / T) + np.log(Z)
 
-    def g_res(self):
-        a_res = self.a_res()
-        Z = self.Z()
+    def g_res(model):
+        a_res = model.a_res()
+        Z = model.Z()
         return a_res + (Z - 1) - np.log(Z)
 
-    def μ_res(self):
+    def μ_res(model):
 
-        z = self.z
-        T = self.T
+        z = model.z
+        T = model.T
 
-        a_res = self.a_res()
-        Z = self.Z()
-        da_dx = self.da_dx()
+        a_res = model.a_res()
+        Z = model.Z()
+        da_dx = model.da_dx()
 
         Σ = np.sum([z[j] * da_dx[j] for j in range(len(z))])
 
-        μ_res = [(a_res + (Z - 1) + da_dx[i] - Σ) * self.kb * T for i in range(len(z))]
+        μ_res = [(a_res + (Z - 1) + da_dx[i] - Σ) * model.kb * T for i in range(len(z))]
 
         return np.array(μ_res)
 
-    def φ(self):
+    def φ(model):
 
-        T = self.T
-        μ_res = self.μ_res()
-        Z = self.Z()
+        T = model.T
+        μ_res = model.μ_res()
+        Z = model.Z()
 
-        return np.exp(μ_res / self.kb / T - np.log(Z))
+        return np.exp(μ_res / model.kb / T - np.log(Z))
 
 
 def flash(x, y, T, P, m, σ, ϵ_k, k_ij, flash_type='Bubble_T', κ_AB=None, ϵ_AB_k=None):
@@ -451,5 +453,34 @@ def flash(x, y, T, P, m, σ, ϵ_k, k_ij, flash_type='Bubble_T', κ_AB=None, ϵ_A
     else:
         print('Wrong Flash Type')
         guesses = []
-    ans = root(f, np.array([guesses])).x
+    options = {'xtol': 1e-4,}
+    ans = root(f, np.array([guesses]), options=options).x
     return ans[:-1], ans[-1]
+
+def BPT_gekko(x, y, T, P, m, σ, ϵ_k, k_ij, κ_AB=None, ϵ_AB_k=None):
+
+    def fun(z):
+        y1, y2, y3, P = z
+        y = np.array([y1, y2, y3])
+
+        mix_l = PCSAFT(T, x, m, σ, ϵ_k, k_ij, phase='liquid', P_sys=P, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
+        mix_v = PCSAFT(T, y, m, σ, ϵ_k, k_ij, phase='vapor', P_sys=P, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
+
+        φ_l = mix_l.φ()
+        φ_v = mix_v.φ()
+
+        eqs = [(y[i] * φ_v[i] - x[i] * φ_l[i]) for i in range(len(y))]
+        eqs.append(1 - np.sum([y[i] for i in range(len(y))]))
+
+        return eqs
+
+    bnds = ([0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, np.inf])
+    guesses = np.array([y[0], y[1], y[2], P])
+    res = least_squares(fun, guesses, bounds=bnds, ftol=1e-3, xtol=1e-3)
+    ans = res.x
+
+    return ans[:-1], ans[-1]
+
+
+
+
