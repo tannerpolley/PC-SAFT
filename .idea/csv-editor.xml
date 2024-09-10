@@ -3,56 +3,84 @@
   <component name="CsvFileAttributes">
     <option name="attributeMap">
       <map>
-        <entry key="\data\Parameters\ParametersOG.csv">
+        <entry key="\PC_SAFT\PC_SAFT_data.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\Xu_0.csv">
+        <entry key="\PC_SAFT\PC_SAFT_data_1.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\Aronu_2011_VLE.csv">
+        <entry key="\PC_SAFT\eta_data.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\Hilliard_2008_VLE.csv">
+        <entry key="\eNRTL\.ipynb_checkpoints\Parameters-checkpoint.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\Jou_1995_VLE.csv">
+        <entry key="\eNRTL\.ipynb_checkpoints\Parameters_Latex-checkpoint.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\Mamun_2005_VLE.csv">
+        <entry key="\eNRTL\Dataset_Example.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\XuSorted_2011_VLE.csv">
+        <entry key="\eNRTL\data\Parameters\Parameters_fit.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
             </Attribute>
           </value>
         </entry>
-        <entry key="\data\data_sets_to_load\kim_2007_dHabs.csv">
+        <entry key="\eNRTL\data\data_sets_to_load\Bottinger_2007_ChEq.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\eNRTL\data\data_sets_to_load\Hilliard_2008_VLE.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\eNRTL\data\data_sets_to_load\Jakobsen_2005_ChEq.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\eNRTL\data\data_sets_to_load\Jou_1995_VLE.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\eNRTL\data\data_sets_to_load\kim_2007_dHabs.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
