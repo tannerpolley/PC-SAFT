@@ -92,7 +92,7 @@ def PC_SAFT_bubble_T(x, yg, T, Pg, m_seg, σ, ϵ_k, k_ij, κ_AB=None, ϵ_AB_k=No
         return m.Intermediate(a_hc + a_disp)
 
     def f_da_res_deta(m, z, eta, T):
-        δ = .0001
+        δ = .00001
         h = eta * δ
         eta1 = eta - 2 * h
         eta2 = eta - 1 * h
@@ -105,7 +105,7 @@ def PC_SAFT_bubble_T(x, yg, T, Pg, m_seg, σ, ϵ_k, k_ij, κ_AB=None, ϵ_AB_k=No
         return m.Intermediate((a_res_1 - 8 * a_res_2 + 8 * a_res_3 - a_res_4) / (12 * h))
 
     def f_da_res_dT(m, z, eta, T):
-        δ = .0001
+        δ = .00001
         h = T * δ
         ρ = f_ρ(m, z, eta, T)
         a_res_1 = f_a_res(m, z, T - 2 * h, ρ)
@@ -116,7 +116,7 @@ def PC_SAFT_bubble_T(x, yg, T, Pg, m_seg, σ, ϵ_k, k_ij, κ_AB=None, ϵ_AB_k=No
         return m.Intermediate((a_res_1 - 8 * a_res_2 + 8 * a_res_3 - a_res_4) / (12 * h))
 
     def f_da_res_dz(m, z, eta, T, j):
-        δ = .0001
+        δ = .00001
         h = z[j] * δ
 
         diff = [-2 * h, -h, h, 2 * h]
@@ -221,22 +221,24 @@ def PC_SAFT_bubble_T(x, yg, T, Pg, m_seg, σ, ϵ_k, k_ij, κ_AB=None, ϵ_AB_k=No
     log = m.log
     sum = np.sum
 
-    # etal = m.Var(value=.5)
-    # etav = m.Var(value=10e-10)
-    etal = .39490600
-    etav = .00145987
+    etal = m.Var(value=.5)
+    etav = m.Var(value=10e-10)
+    # etal = .39490600
+    # etav = .00145987
     y = [m.Var(value=yg[i], lb=0, ub=1, name=f'y_{i + 1}') for i in range(len(yg))]
-    # P = m.Var(value=5e5, lb=0, ub=1e7, name=f'P')
+    P = m.Var(value=5e5, lb=0, ub=1e7, name=f'P')
     φv = [m.Intermediate(f_φ(m, y, etav, T)[i]) for i in range(len(yg))]
     φl = [m.Intermediate(f_φ(m, x, etal, T)[i]) for i in range(len(yg))]
 
-    # m.Equation(f_P(m, y, etav, T)/1e6 == P/1e6)
-    # m.Equation(f_P(m, x, etal, T)/1e6 == P/1e6)
+    m.Equation(f_P(m, y, etav, T)/1e6 == P/1e6)
+    m.Equation(f_P(m, x, etal, T)/1e6 == P/1e6)
     m.Equation([y[i] * φv[i] == x[i] * φl[i] for i in range(3)])
-    # m.Equation(1 == sum(y))
+    m.Equation(1 == sum(y))
     m.options.IMODE = 1
     m.options.SOLVER = 3
-    m.open_folder()
-    m.solve(disp=True)
-    print(y[0].value[0], y[1].value[0], y[2].value[0])
-    return φl[0].value[0]
+    # m.open_folder()
+    m.solve(disp=False)
+    y_CO2 = y[0].value[0]
+    P = P.value[0]
+    P_CO2 = P*y_CO2
+    return P_CO2

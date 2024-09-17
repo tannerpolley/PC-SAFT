@@ -291,17 +291,25 @@ def thermodynamic_model(data):
                      doc='Salt-Molecule interaction parameters')
     for i in Enrtl_sets.cam:
         if i == ('H2O', 'MEAH+', 'MEACOO-'):
-            model.Ccam[i].fix(18.588108594566588)#6.732)
-            model.Dcam[i].fix(-1533.6489230168652)#-9.2407)
+            # model.Ccam[i].fix(18.588108594566588)#6.732)
+            # model.Dcam[i].fix(-1533.6489230168652)#-9.2407)
+            model.Ccam[i].fix(-2.601)#6.732)
+            model.Dcam[i].fix(-852.138)#-9.2407)
         elif i == ('H2O', 'MEAH+', 'HCO3-'):
-            model.Ccam[i].fix(8.5721)
-            model.Dcam[i].fix(0.0)
+            # model.Ccam[i].fix(8.5721)
+            # model.Dcam[i].fix(0.0)
+            model.Ccam[i].fix(19.405)
+            model.Dcam[i].fix(4246.160)
         elif i == ('MEAH+', 'MEACOO-', 'H2O'):
-            model.Ccam[i].fix(-7.055694714651596)#-3.1628)
-            model.Dcam[i].fix(1224.0939968361579)#39.498)
+            # model.Ccam[i].fix(-7.055694714651596)#-3.1628)
+            # model.Dcam[i].fix(1224.0939968361579)#39.498)
+            model.Ccam[i].fix(-10.416)#-3.1628)
+            model.Dcam[i].fix(2942.967)#39.498)
         elif i == ('MEAH+', 'HCO3-', 'H2O'):
-            model.Ccam[i].fix(-4.0092)
-            model.Dcam[i].fix(0.0)
+            # model.Ccam[i].fix(-4.0092)
+            # model.Dcam[i].fix(0.0)
+            model.Ccam[i].fix(5.5575)
+            model.Dcam[i].fix(1472.185)
         else:
             if i[0] in Enrtl_sets.Sm:
                 model.Ccam[i].fix(8)
@@ -1261,11 +1269,11 @@ def thermodynamic_model(data):
     model.lnK = Expression([1,2],rule=rule_lnK)
 
     def rule_dlnKdT(b,r):
-        return -b.T**2/R*sum(stoich[r,i]*b.dG_TdT[i] for i in Enrtl_sets.Smac)
+        return -1/R*sum(stoich[r,i]*b.dG_TdT[i] for i in Enrtl_sets.Smac)
     model.dlnKdT = Expression([1,2],rule=rule_dlnKdT)
 
     def rule_projector(b,p):
-        return R*(b.dlnKdT[1]*b.nt[p,'MEACOO-'] +
+        return R*b.T**2*(b.dlnKdT[1]*b.nt[p,'MEACOO-'] +
                   b.dlnKdT[2]*b.nt[p,'HCO3-'])
     model.projector = Expression(xa_id,rule=rule_projector)
 
@@ -1674,48 +1682,48 @@ if __name__ == "__main__":
 
     #==========================================================================
     #HEAT OF ABSORPTION
-    # fig = plt.figure(figsize=(8,7),)
-    # #model
-    # # plt.plot(LD,Habs_40,
-    # #              linestyle="-",c='g',label='Model: 40$^{\mathrm{o}}$C')
-    # # plt.plot(LD,Habs_80,
-    # #              linestyle="--",c='b',label='Model: 80$^{\mathrm{o}}$C')
-    # # plt.plot(LD,Habs_120,
-    # #              linestyle=":",c='r',label='Model: 120$^{\mathrm{o}}$C')
-    #
-    # plt.plot(LD,HLf_40,
-    #              linestyle="-",c='r',label='HLf Model: 40$^{\mathrm{o}}$C')
-    # plt.plot(LD,HLf_80,
-    #              linestyle="-",c='b',label='HLf Model: 80$^{\mathrm{o}}$C')
-    # plt.plot(LD,HLf_120,
-    #              linestyle="-",c='g',label='HLf Model: 120$^{\mathrm{o}}$C')
-    #
-    # plt.plot(LD,HLi_40,
-    #              linestyle="-.",c='r',label='HLi Model: 40$^{\mathrm{o}}$C')
-    # plt.plot(LD,HLi_80,
-    #              linestyle="-.",c='b',label='HLi Model: 80$^{\mathrm{o}}$C')
-    # plt.plot(LD,HLi_120,
-    #              linestyle="-.",c='g',label='HLi Model: 120$^{\mathrm{o}}$C')
-    #
-    # #data
-    # # plt.plot(L_data_40,H_data_40,marker='^',markersize=10,mec="g",mfc="None",
-    # #          linestyle="",c='g',label='Dataset: 40A')
-    # # plt.plot(L_data_40b,H_data_40b,marker='^',markersize=10,mec="g",mfc="g",
-    # #          linestyle="",c='b',label='Dataset: 40B')
-    # # plt.plot(L_data_80,H_data_80,marker='o',markersize=10,mec="b",mfc="None",
-    # #          linestyle="",c='b',label='Dataset: 80A')
-    # # plt.plot(L_data_80b,H_data_80b,marker='o',markersize=10,mec="b",mfc="b",
-    # #          linestyle="",c='b',label='Dataset: 80B')
-    # # plt.plot(L_data_120,H_data_120,marker='s',markersize=10,mec="r",mfc="None",
-    # #          linestyle="",c='r',label='Dataset: 120A')
-    #
-    # plt.ylabel('Negative H$_{\mathrm{abs}}$, kJ/mol CO$_{2}$',fontsize=12)
-    # plt.legend(fontsize=12)
-    # plt.tick_params(labelsize=12)
-    # plt.xlabel('Loading, mol CO$_{2}$/mol MEA',fontsize=12)
-    # plt.xlim(0.03,0.6)
-    # plt.tight_layout()
-    # plt.show()
+    fig = plt.figure(figsize=(8,7),)
+    #model
+    # plt.plot(LD,Habs_40,
+    #              linestyle="-",c='g',label='Model: 40$^{\mathrm{o}}$C')
+    # plt.plot(LD,Habs_80,
+    #              linestyle="--",c='b',label='Model: 80$^{\mathrm{o}}$C')
+    # plt.plot(LD,Habs_120,
+    #              linestyle=":",c='r',label='Model: 120$^{\mathrm{o}}$C')
+
+    plt.plot(LD,HLf_40,
+                 linestyle="-",c='r',label='HLf Model: 40$^{\mathrm{o}}$C')
+    plt.plot(LD,HLf_80,
+                 linestyle="-",c='b',label='HLf Model: 80$^{\mathrm{o}}$C')
+    plt.plot(LD,HLf_120,
+                 linestyle="-",c='g',label='HLf Model: 120$^{\mathrm{o}}$C')
+
+    plt.plot(LD,HLi_40,
+                 linestyle="-.",c='r',label='HLi Model: 40$^{\mathrm{o}}$C')
+    plt.plot(LD,HLi_80,
+                 linestyle="-.",c='b',label='HLi Model: 80$^{\mathrm{o}}$C')
+    plt.plot(LD,HLi_120,
+                 linestyle="-.",c='g',label='HLi Model: 120$^{\mathrm{o}}$C')
+
+    #data
+    # plt.plot(L_data_40,H_data_40,marker='^',markersize=10,mec="g",mfc="None",
+    #          linestyle="",c='g',label='Dataset: 40A')
+    # plt.plot(L_data_40b,H_data_40b,marker='^',markersize=10,mec="g",mfc="g",
+    #          linestyle="",c='b',label='Dataset: 40B')
+    # plt.plot(L_data_80,H_data_80,marker='o',markersize=10,mec="b",mfc="None",
+    #          linestyle="",c='b',label='Dataset: 80A')
+    # plt.plot(L_data_80b,H_data_80b,marker='o',markersize=10,mec="b",mfc="b",
+    #          linestyle="",c='b',label='Dataset: 80B')
+    # plt.plot(L_data_120,H_data_120,marker='s',markersize=10,mec="r",mfc="None",
+    #          linestyle="",c='r',label='Dataset: 120A')
+
+    plt.ylabel('Negative H$_{\mathrm{abs}}$, kJ/mol CO$_{2}$',fontsize=12)
+    plt.legend(fontsize=12)
+    plt.tick_params(labelsize=12)
+    plt.xlabel('Loading, mol CO$_{2}$/mol MEA',fontsize=12)
+    plt.xlim(0.03,0.6)
+    plt.tight_layout()
+    plt.show()
 
     #==========================================================================
     # Excess Enthalpy spanned by true species

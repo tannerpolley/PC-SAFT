@@ -83,8 +83,17 @@ def get_true_mol_frac(alpha, w_MEA, Tl):
         Cl_MEACOO = guesses[4]
         Cl_HCO3 = guesses[5]
 
-        a1, b1, c1, d1 = 234.2, -1434.4, -36.8, -.0074
-        a2, b2, c2, d2 = 176.8, -991.2, -29.5, .0129
+        # a1, b1, c1, d1 = 234.2, -1434.4, -36.8, -.0074
+        # a2, b2, c2, d2 = 176.8, -991.2, -29.5, .0129
+
+        # a1, b1, c1, d1 = 233.4, -3410, -36.8, 0
+        # a2, b2, c2, d2 = 176.72, -2909, -28.46, 0
+
+        a1, b1, c1, d1 = 233.4, -899.9, -37.5, 0
+        a2, b2, c2, d2 = 176.72, -1947.9, -28.2, 0
+
+        # a1, b1, c1 = m.Param(234.4), m.Param(-899.9), m.Param(-37.5)
+        # a2, b2, c2 = m.Param(176.2), m.Param(-1947.9), m.Param(-28.2)
 
         K1 = np.exp(a1 + b1 / Tl + c1 * np.log(Tl) + d1 * Tl) / 1000  # kmol -> mol
         K2 = np.exp(a2 + b2 / Tl + c2 * np.log(Tl) + d2 * Tl) / 1000  # kmol -> mol
@@ -176,7 +185,7 @@ def get_true_mol_frac(alpha, w_MEA, Tl):
     for c in comp:
         x_true_return.append(float(interp_dic[c](alpha)))
 
-    return x_true_return
+    return np.array(x_true_return)
 
 
 # if __name__ == '__main__':
