@@ -9,12 +9,17 @@ cimport pcsaft
 class InputError(Exception):
     # Exception raised for errors in the input.
     def __init__(self, message):
+        super().__init__(message)
         self.message = message
 
 class SolutionError(Exception):
     # Exception raised when a solver does not return a value.
     def __init__(self, message):
+        super().__init__(message)
         self.message = message
+
+def _raise_solution_error(func_name, exc):
+    raise SolutionError("{} failed: {}".format(func_name, exc))
 
 def check_input(x, vars):
     if abs(np.sum(x) - 1) > 1e-7:
@@ -31,6 +36,31 @@ def check_input(x, vars):
     if 'Q' in vars:
         if (vars['Q'] < 0) or (vars['Q'] > 1):
             raise InputError('{} must be <= 1 and >= 0. {} = {}'.format('Q', 'Q', vars['Q']))
+
+def validate_params(x, params):
+    n = int(np.asarray(x).shape[0])
+    for key in ('m', 's', 'e'):
+        if key not in params:
+            raise InputError('Missing required parameter: {}'.format(key))
+        if np.size(params[key]) != n:
+            raise InputError('Parameter {} must have length {}.'.format(key, n))
+
+    if 'k_ij' in params:
+        k_ij = np.asarray(params['k_ij'])
+        if k_ij.shape != (n, n):
+            raise InputError('k_ij must have shape ({0},{0}).'.format(n))
+
+    for key in ('MW', 'z', 'dielc', 'dipm', 'dip_num', 'e_assoc', 'vol_a', 'd_born', 'f_solv'):
+        if key in params and np.size(params[key]) not in (0, n):
+            raise InputError('Parameter {} must have length {}.'.format(key, n))
+
+    if ('z' in params) or ('dielc' in params) or ('MW' in params):
+        if ('z' not in params) or ('dielc' not in params) or ('MW' not in params):
+            raise InputError('Electrolyte calculations require z, dielc, and MW.')
+
+    if 'assoc_scheme' in params:
+        if len(params['assoc_scheme']) != n:
+            raise InputError('assoc_scheme must have length {}.'.format(n))
 
 def check_association(params):
     if ('e_assoc' in params) and ('vol_a' not in params):
@@ -88,15 +118,15 @@ def create_assoc_matrix(params):
     params['assoc_matrix'] = np.zeros((len(charge)*len(charge)))
     ctr = 0
     for c1 in charge:
-        for c2 in charge:
-            if (c1 == 0 or c2 == 0):
-                params['assoc_matrix'][ctr] = 1;
-            elif (c1 == 1 and c2 == -1):
-                params['assoc_matrix'][ctr] = 1;
-            elif (c1 == -1 and c2 == 1):
-                params['assoc_matrix'][ctr] = 1;
+        for c2 in charge[::-1]:
+            if c1 == 0 or c2 == 0:
+                params['assoc_matrix'][ctr] = 1
+            elif c1 == 1 and c2 == -1:
+                params['assoc_matrix'][ctr] = 1
+            elif c1 == -1 and c2 == 1:
+                params['assoc_matrix'][ctr] = 1
             else:
-                params['assoc_matrix'][ctr] = 0;
+                params['assoc_matrix'][ctr] = 0
             ctr += 1
 
     return params
@@ -175,8 +205,12 @@ def pcsaft_p(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_p_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_p_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_p', exc)
 
 
 def pcsaft_lnfugcoef(t, rho, x, params):
@@ -242,8 +276,12 @@ def pcsaft_lnfugcoef(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return np.asarray(pcsaft_lnfug_cpp(t, rho, x, cppargs))
+    try:
+        return np.asarray(pcsaft_lnfug_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_lnfugcoef', exc)
 
 
 def pcsaft_fugcoef(t, rho, x, params):
@@ -309,8 +347,12 @@ def pcsaft_fugcoef(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
+    try:
+        return np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_fugcoef', exc)
 
 
 def pcsaft_Z(t, rho, x, params):
@@ -376,8 +418,12 @@ def pcsaft_Z(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_Z_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_Z_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_Z', exc)
 
 
 def flashPQ(p, q, x, params, t_guess=None):
@@ -472,14 +518,15 @@ def flashPQ(p, q, x, params, t_guess=None):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'pressure':p, 'Q':q})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
     try:
         if t_guess is not None:
             result = flashPQ_cpp(p, q, x, cppargs, t_guess)
         else:
             result = flashPQ_cpp(p, q, x, cppargs)
-    except:
-        raise SolutionError('A solution was not found for flashPQ. P={}'.format(p))
+    except Exception as exc:
+        _raise_solution_error('flashPQ', exc)
 
     t = result[0]
     xl = np.asarray(result[1:])
@@ -557,14 +604,15 @@ def flashTQ(t, q, x, params, p_guess=None):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'temperature':t, 'Q':q})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
     try:
         if p_guess is not None:
             result = flashTQ_cpp(t, q, x, cppargs, p_guess)
         else:
             result = flashTQ_cpp(t, q, x, cppargs)
-    except:
-        raise SolutionError('A solution was not found for flashTQ. T={}'.format(t))
+    except Exception as exc:
+        _raise_solution_error('flashTQ', exc)
 
     p = result[0]
     xl = np.asarray(result[1:])
@@ -637,6 +685,7 @@ def pcsaft_Hvap(t, x, params, p_guess=None):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'temperature': t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
 
     q = 0
@@ -647,13 +696,16 @@ def pcsaft_Hvap(t, x, params, p_guess=None):
         else:
             result = np.asarray(flashTQ_cpp(t, q, x, cppargs))
             Pvap = result[0]
-    except:
-        raise SolutionError('A solution was not found for flashTQ. T={}'.format(t))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_Hvap', exc)
 
-    rho = pcsaft_den_cpp(t, Pvap, x, 0, cppargs)
-    hres_l = pcsaft_hres_cpp(t, rho, x, cppargs)
-    rho = pcsaft_den_cpp(t, Pvap, x, 1, cppargs)
-    hres_v = pcsaft_hres_cpp(t, rho, x, cppargs)
+    try:
+        rho = pcsaft_den_cpp(t, Pvap, x, 0, cppargs)
+        hres_l = pcsaft_hres_cpp(t, rho, x, cppargs)
+        rho = pcsaft_den_cpp(t, Pvap, x, 1, cppargs)
+        hres_v = pcsaft_hres_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_Hvap', exc)
     Hvap = hres_v - hres_l
 
     output = [Hvap, Pvap]
@@ -723,6 +775,7 @@ def pcsaft_osmoticC(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
 
     indx_water = np.where(params['e'] == 353.9449)[0] # to find index for water
@@ -731,14 +784,20 @@ def pcsaft_osmoticC(t, rho, x, params):
     x0 = np.zeros_like(x)
     x0[indx_water] = 1.
 
-    fugcoef = np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
-    p = pcsaft_p_cpp(t, rho, x, cppargs)
+    try:
+        fugcoef = np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
+        p = pcsaft_p_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_osmoticC', exc)
     if rho < 900:
         ph = 1
     else:
         ph = 0
-    rho0 = pcsaft_den_cpp(t, p, x0, ph, cppargs)
-    fugcoef0 = np.asarray(pcsaft_fugcoef_cpp(t, rho0, x0, cppargs))
+    try:
+        rho0 = pcsaft_den_cpp(t, p, x0, ph, cppargs)
+        fugcoef0 = np.asarray(pcsaft_fugcoef_cpp(t, rho0, x0, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_osmoticC', exc)
     gamma = fugcoef[indx_water]/fugcoef0[indx_water]
 
     osmC = -1000*np.log(x[indx_water]*gamma)/18.0153/np.sum(molality)
@@ -811,6 +870,7 @@ def pcsaft_cp(t, rho, aly_lee_params, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
 
     if rho > 900:
         ph = 0
@@ -820,11 +880,14 @@ def pcsaft_cp(t, rho, aly_lee_params, x, params):
     cppargs = create_struct(params)
 
     cp_ideal = aly_lee(t, aly_lee_params)
-    p = pcsaft_p_cpp(t, rho, x, cppargs)
-    rho0 = pcsaft_den_cpp(t-0.001, p, x, ph, cppargs)
-    hres0 = pcsaft_hres_cpp(t-0.001, rho0, x, cppargs)
-    rho1 = pcsaft_den_cpp(t+0.001, p, x, ph, cppargs)
-    hres1 = pcsaft_hres_cpp(t+0.001, rho1, x, cppargs)
+    try:
+        p = pcsaft_p_cpp(t, rho, x, cppargs)
+        rho0 = pcsaft_den_cpp(t-0.001, p, x, ph, cppargs)
+        hres0 = pcsaft_hres_cpp(t-0.001, rho0, x, cppargs)
+        rho1 = pcsaft_den_cpp(t+0.001, p, x, ph, cppargs)
+        hres1 = pcsaft_hres_cpp(t+0.001, rho1, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_cp', exc)
     dhdt = (hres1-hres0)/0.002 # a numerical derivative is used for now until analytical derivatives are ready
     return cp_ideal + dhdt
 
@@ -896,13 +959,17 @@ def pcsaft_den(t, p, x, params, phase='liq'):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'pressure':p, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
     if phase == 'liq':
         phase_num = 0
     else:
         phase_num = 1
 
-    return pcsaft_den_cpp(t, p, x, phase_num, cppargs)
+    try:
+        return pcsaft_den_cpp(t, p, x, phase_num, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_den', exc)
 
 
 def pcsaft_hres(t, rho, x, params):
@@ -968,8 +1035,12 @@ def pcsaft_hres(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_hres_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_hres_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_hres', exc)
 
 def pcsaft_sres(t, rho, x, params):
     """
@@ -1034,8 +1105,12 @@ def pcsaft_sres(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_sres_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_sres_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_sres', exc)
 
 def pcsaft_gres(t, rho, x, params):
     """
@@ -1100,8 +1175,12 @@ def pcsaft_gres(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_gres_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_gres_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_gres', exc)
 
 
 def pcsaft_ares(t, rho, x, params):
@@ -1167,8 +1246,12 @@ def pcsaft_ares(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_ares_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_ares_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_ares', exc)
 
 
 def pcsaft_dadt(t, rho, x, params):
@@ -1234,8 +1317,12 @@ def pcsaft_dadt(t, rho, x, params):
     x, params = ensure_numpy_input(x, params)
     check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
+    validate_params(x, params)
     cppargs = create_struct(params)
-    return pcsaft_dadt_cpp(t, rho, x, cppargs)
+    try:
+        return pcsaft_dadt_cpp(t, rho, x, cppargs)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_dadt', exc)
 
 
 def aly_lee(t, c):
@@ -1341,10 +1428,16 @@ def create_struct(params):
         cppargs.dipm = np_to_vector_double(params['dipm'])
     if ('dip_num' in params) and np.any(params['dip_num']):
         cppargs.dip_num = np_to_vector_double(params['dip_num'])
+    if 'MW' in params:
+        cppargs.MW = np_to_vector_double(params['MW'])
     if 'z' in params:
         cppargs.z = np_to_vector_double(params['z'])
     if 'dielc' in params:
-        cppargs.dielc = params['dielc']
+        cppargs.dielc = np_to_vector_double(params['dielc'])
+    if 'd_born' in params:
+        cppargs.d_born = np_to_vector_double(params['d_born'])
+    if 'f_solv' in params:
+        cppargs.f_solv = np_to_vector_double(params['f_solv'])
     if 'assoc_num' in params:
         cppargs.assoc_num = np_to_vector_int(params['assoc_num'])
     if 'assoc_matrix' in params:

@@ -1,6 +1,9 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <iostream>
+#include <iomanip>
+using namespace std;
 #include "math.h"
 #include "externals/eigen/Eigen/Dense"
 
@@ -17,13 +20,57 @@ using std::vector;
     #endif
 #endif
 
+double dielc_sum(vector<double> dielc, vector<double> x, vector<double> z, vector<double> MW) {
+
+
+    const std::size_t N = x.size();
+    if (dielc.size() != N || z.size() != N || MW.size() != N) {
+        throw std::invalid_argument("dielc_mixture: input size mismatch");
+    }
+
+
+    // Identify solvents (z == 0)
+    double x_solv = 0.0;
+    std::vector<std::size_t> idx_solv;
+    for (std::size_t i = 0; i < N; ++i) {
+        if (std::fabs(z[i]) < 1e-12) {  // solvent
+            idx_solv.push_back(i);
+            x_solv += x[i];
+        }
+    }
+
+    // Compute solvent-weighted dielectric average: Σ(ε_i * w_i^solv)
+    double solvent_mix = 0.0;
+    if (!idx_solv.empty() && x_solv > 0.0) {
+        // total solvent mass
+        double m_tot = 0.0;
+        for (auto i : idx_solv) {
+            m_tot += x[i] * MW[i];
+        }
+
+        for (auto i : idx_solv) {
+            const double w_i_solv = (x[i] * MW[i]) / m_tot;  // mass fraction within solvent pool
+            solvent_mix += dielc[i] * w_i_solv;
+        }
+    }
+
+    // Ionic contribution: Σ ε_i * x_i where |z| > 0
+    double ion_mix = 0.0;
+    for (std::size_t i = 0; i < N; ++i) {
+        if (std::fabs(z[i]) > 1e-12) {
+            ion_mix += dielc[i] * x[i];
+        }
+    }
+
+    return solvent_mix * x_solv + ion_mix;
+}
+
 
 vector<double> XA_find(vector<double> XA_guess, vector<double> delta_ij, double den,
     vector<double> x) {
     /**Iterate over this function in order to solve for XA*/
-    int num_sites = XA_guess.size();
+    int num_sites = x.size();
     vector<double> XA = XA_guess;
-
     int idxij = -1; // index for delta_ij
     for (int i = 0; i < num_sites; i++) {
         double summ = 0.;
@@ -340,15 +387,15 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
             for (int j = 0; j < num_sites; j++) {
                 idxj = iA[j]*ncomp+iA[j];
                 if (cppargs.assoc_matrix[idxa] != 0) {
-                    double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                    double volABij = _HUGE;
-                    if (cppargs.k_hb.empty()) {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                             s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                     }
                     else {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                     }
                     delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
                 }
@@ -371,15 +418,15 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
                 for (int j = 0; j < num_sites; j++) {
                     idxj = iA[j]*ncomp+iA[j];
                     if (cppargs.assoc_matrix[idxa] != 0) {
-                        double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                        double volABij = _HUGE;
-                        if (cppargs.k_hb.empty()) {
-                            volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                        double eABij = _HUGE;
+                        double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                                 s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                        if (cppargs.k_hb.empty()) {
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                         }
                         else {
-                            volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                                s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                         }
                         double dghsd_dx = PI/6.*cppargs.m[k]*(pow(d[k], 3)/(1-zeta[3])/(1-zeta[3]) + 3*d[iA[i]]*d[iA[j]]/
                             (d[iA[i]]+d[iA[j]])*(d[k]*d[k]/(1-zeta[3])/(1-zeta[3])+2*pow(d[k], 3)*
@@ -425,8 +472,10 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
     }
 
     // Ion term ---------------------------------------------------------------
+
     double Zion = 0;
     if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -437,7 +486,7 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
             summ += cppargs.z[i]*cppargs.z[i]*x[i];
         }
 
-        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(cppargs.dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
+        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
 
         if (kappa != 0) {
             double chi, sigma_k;
@@ -448,11 +497,14 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
                 sigma_k = -2*chi+3/(1+kappa*d[i]);
                 summ += q[i]*q[i]*x[i]*sigma_k;
             }
-            Zion = -1*kappa/24./PI/kb/t/(cppargs.dielc*perm_vac)*summ;
+            Zion = -1*kappa/24./PI/kb/t/(dielc*perm_vac)*summ;
         }
     }
 
-    double Z = Zid + Zhc + Zdisp + Zpolar + Zassoc + Zion;
+    // Born term ---------------------------------------------------------------
+    double Zborn = 0;
+
+    double Z = Zid + Zhc + Zdisp + Zpolar + Zassoc + Zion + Zborn;
     return Z;
 }
 
@@ -815,15 +867,15 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             for (int j = 0; j < num_sites; j++) {
                 idxj = iA[j]*ncomp+iA[j];
                 if (cppargs.assoc_matrix[idxa] != 0) {
-                    double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                    double volABij = _HUGE;
-                    if (cppargs.k_hb.empty()) {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                             s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                     }
                     else {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                     }
                     delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
                 }
@@ -846,15 +898,15 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
                 for (int j = 0; j < num_sites; j++) {
                     idxj = iA[j]*ncomp+iA[j];
                     if (cppargs.assoc_matrix[idxa] != 0) {
-                        double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                        double volABij = _HUGE;
-                        if (cppargs.k_hb.empty()) {
-                            volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                        double eABij = _HUGE;
+                        double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                                 s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                        if (cppargs.k_hb.empty()) {
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                         }
                         else {
-                            volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                                s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                         }
                         double dghsd_dx = PI/6.*cppargs.m[k]*(pow(d[k], 3)/(1-zeta[3])/(1-zeta[3]) + 3*d[iA[i]]*d[iA[j]]/
                             (d[iA[i]]+d[iA[j]])*(d[k]*d[k]/(1-zeta[3])/(1-zeta[3])+2*pow(d[k], 3)*
@@ -901,8 +953,10 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     }
 
     // Ion term ---------------------------------------------------------------
+
     vector<double> mu_ion(ncomp, 0);
     if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -912,7 +966,10 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
         for (int i = 0; i < ncomp; i++) {
             summ += cppargs.z[i]*cppargs.z[i]*x[i];
         }
-        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(cppargs.dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
+        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
+
+
+
 
         if (kappa != 0) {
             vector<double> chi(ncomp);
@@ -928,23 +985,70 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             }
 
             for (int i = 0; i < ncomp; i++) {
-                mu_ion[i] = -q[i]*q[i]*kappa/24./PI/kb/t/(cppargs.dielc*perm_vac)*
+                mu_ion[i] = -q[i]*q[i]*kappa/24./PI/kb/t/(dielc*perm_vac)*
                     (2*chi[i] + summ1/summ2);
             }
         }
     }
+
+    // Born term ---------------------------------------------------------------
+
+    vector<double> mu_born(ncomp, 0);
+    if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double summ = 0.;
+        for (int i = 0; i < ncomp; i++) {
+            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
+            }
+
+        double ares_born =  -pow(E_CHRG, 2) / (4. * PI * kb * t * perm_vac) * (1 - 1 / dielc) * summ;
+        double Zborn = 0;
+
+        vector<double> daborn_dx(ncomp, 0);
+        for (int i = 0; i < ncomp; i++) {
+            daborn_dx[i] = - pow(E_CHRG, 2) / (4 * PI * kb * t * perm_vac) *
+                            ((1 - 1 / dielc) * (cppargs.z[i] * cppargs.z[i] / d[i]) + summ * (1/ (dielc * dielc)) * (cppargs.dielc[i]));
+        }
+
+        for (int i = 0; i < ncomp; i++) {
+            for (int j = 0; j < ncomp; j++) {
+
+                mu_born[i] += x[j]*daborn_dx[j];
+            }
+            if (cppargs.z[i] != 0) {
+                mu_born[i] = ares_born + Zborn + daborn_dx[i] - mu_born[i];
+            }
+            else {
+                mu_born[i] = 0;
+            }
+        }
+    }
+
+
 
     double Z = pcsaft_Z_cpp(t, rho, x, cppargs);
 
     vector<double> mu(ncomp, 0);
     vector<double> lnfugcoef(ncomp, 0);
     for (int i = 0; i < ncomp; i++) {
-        mu[i] = mu_hc[i] + mu_disp[i] + mu_polar[i] + mu_assoc[i] + mu_ion[i];
+        mu[i] = mu_hc[i] + mu_disp[i] + mu_polar[i] + mu_assoc[i] + mu_ion[i] + mu_born[i];
         lnfugcoef[i] = mu[i] - log(Z); // the natural logarithm of the fugacity coefficient
     }
 
     return lnfugcoef;
 }
+
+//    vector<double> mu_contr = {mu_hc[1], mu_disp[1], mu_assoc[1], mu_ion[1], mu_born[1]};
+//
+//    vector<double> lnfugcoef(5, 0);
+//    for (int i = 0; i < 5; i++) {
+//        lnfugcoef[i] = mu_contr[i];
+//    }
+//    return lnfugcoef;
+//}
+
+
+
 
 
 vector<double> pcsaft_fugcoef_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
@@ -1178,20 +1282,24 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
             for (int j = 0; j < num_sites; j++) {
                 idxj = iA[j]*ncomp+iA[j];
                 if (cppargs.assoc_matrix[idxa] != 0) {
-                    double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                    double volABij = _HUGE;
-                    if (cppargs.k_hb.empty()) {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                             s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                     }
                     else {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                     }
+
                     delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
+
+
                 }
                 idxa += 1;
             }
+
             XA[i] = (-1 + sqrt(1+8*den*delta_ij[i*num_sites+i]))/(4*den*delta_ij[i*num_sites+i]);
             if (!std::isfinite(XA[i])) {
                 XA[i] = 0.02;
@@ -1204,6 +1312,7 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
         while ((ctr < 100) && (dif > 1e-15)) {
             ctr += 1;
             XA = XA_find(XA_old, delta_ij, den, x_assoc);
+
             dif = 0.;
             for (int i = 0; i < num_sites; i++) {
                 dif += std::abs(XA[i] - XA_old[i]);
@@ -1220,8 +1329,10 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
     }
 
     // Ion term ---------------------------------------------------------------
+
     double ares_ion = 0.;
     if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -1231,7 +1342,7 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
         for (int i = 0; i < ncomp; i++) {
             summ += cppargs.z[i]*cppargs.z[i]*x[i];
         }
-        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(cppargs.dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
+        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
 
         if (kappa != 0) {
             vector<double> chi(ncomp);
@@ -1242,11 +1353,23 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
                 summ += x[i]*q[i]*q[i]*chi[i]*kappa;
             }
 
-            ares_ion = -1/12./PI/kb/t/(cppargs.dielc*perm_vac)*summ;
+            ares_ion = -1/12./PI/kb/t/(dielc*perm_vac)*summ;
         }
     }
 
-    double ares = ares_hc + ares_disp + ares_polar + ares_assoc + ares_ion;
+    // Born term ---------------------------------------------------------------
+    double ares_born = 0;
+    if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double summ = 0.;
+        for (int i = 0; i < ncomp; i++) {
+            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
+            }
+
+        ares_born =  -pow(E_CHRG, 2) / (4. * PI * kb * t * perm_vac) * (1 - 1 / dielc) * summ;
+    }
+
+    double ares = ares_hc + ares_disp + ares_polar + ares_assoc + ares_ion + ares_born;
     return ares;
 }
 
@@ -1505,15 +1628,15 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
             for (int j = 0; j < num_sites; j++) {
                 idxj = iA[j]*ncomp+iA[j];
                 if (cppargs.assoc_matrix[idxa] != 0) {
-                    double eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                    double volABij = _HUGE;
-                    if (cppargs.k_hb.empty()) {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
                             s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                     }
                     else {
-                        volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3)*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                     }
                     delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
                     ddelta_dt[idxa] = pow(s_ij[idxj],3)*volABij*(-eABij/pow(t,2)
@@ -1552,8 +1675,10 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
     }
 
     // Ion term ---------------------------------------------------------------
+
     double dadt_ion = 0.;
     if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -1563,7 +1688,7 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
         for (int i = 0; i < ncomp; i++) {
             summ += cppargs.z[i]*cppargs.z[i]*x[i];
         }
-        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(cppargs.dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
+        double kappa = sqrt(den*E_CHRG*E_CHRG/kb/t/(dielc*perm_vac)*summ); // the inverse Debye screening length. Equation 4 in Held et al. 2008.
 
         double dkappa_dt;
         if (kappa != 0) {
@@ -1576,17 +1701,31 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
                 dchikap_dk[i] = -2*chi[i]+3/(1+kappa*d[i]);
                 summ += x[i]*cppargs.z[i]*cppargs.z[i];
             }
-            dkappa_dt = -0.5*den*E_CHRG*E_CHRG/kb/t/t/(cppargs.dielc*perm_vac)*summ/kappa;
+            dkappa_dt = -0.5*den*E_CHRG*E_CHRG/kb/t/t/(dielc*perm_vac)*summ/kappa;
 
             summ = 0.;
             for (int i = 0; i < ncomp; i++) {
                 summ += x[i]*q[i]*q[i]*(dchikap_dk[i]*dkappa_dt/t-kappa*chi[i]/t/t);
             }
-            dadt_ion = -1/12./PI/kb/(cppargs.dielc*perm_vac)*summ;
+            dadt_ion = -1/12./PI/kb/(dielc*perm_vac)*summ;
         }
     }
 
-    double dadt = dadt_hc + dadt_disp + dadt_assoc + dadt_polar + dadt_ion;
+
+    // Born term ---------------------------------------------------------------
+
+    double dadt_born = 0.;
+    if (!cppargs.z.empty()) {
+        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double summ = 0.;
+        for (int i = 0; i < ncomp; i++) {
+            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
+            }
+        dadt_born = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac * t * t) * (1 - 1 / dielc) * summ;
+
+    }
+
+    double dadt = dadt_hc + dadt_disp + dadt_assoc + dadt_polar + dadt_ion + dadt_born;
     return dadt;
 }
 
@@ -1755,7 +1894,7 @@ vector<double> outerPQ(double t_guess, double p, double Q, vector<double> x, add
     if (water_iter != cppargs.e.end()) {
         water_idx = std::distance(cppargs.e.begin(), water_iter);
         cppargs.s[water_idx] = calc_sigma(t, &calc_water_sigma);
-        cppargs.dielc = dielc_water(t); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
+        cppargs.dielc[water_idx] = dielc_water(t); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
     }
 
     // calculate initial guess for compositions based on fugacity coefficients and Raoult's Law.
@@ -1809,7 +1948,7 @@ vector<double> outerPQ(double t_guess, double p, double Q, vector<double> x, add
 
     if (water_idx >= 0) {
         cppargs.s[water_idx] = calc_sigma(Tprime, &calc_water_sigma);
-        cppargs.dielc = dielc_water(Tprime); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
+        cppargs.dielc[water_idx] = dielc_water(Tprime); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
     }
     rhol = pcsaft_den_cpp(Tprime, p, xl, 0, cppargs);
     fugcoef_l = pcsaft_fugcoef_cpp(Tprime, rhol, xl, cppargs);
@@ -1905,7 +2044,7 @@ vector<double> outerPQ(double t_guess, double p, double Q, vector<double> x, add
 
         if (water_idx >= 0) {
             cppargs.s[water_idx] = calc_sigma(t, &calc_water_sigma);
-            cppargs.dielc = dielc_water(t); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
+            cppargs.dielc[water_idx] = dielc_water(t); // Right now only aqueous mixtures are supported. Other solvents could be modeled by replacing the dielc_water function.
         }
         rhol = pcsaft_den_cpp(t, p, xl, 0, cppargs);
         fugcoef_l = pcsaft_fugcoef_cpp(t, rhol, xl, cppargs);
@@ -2342,7 +2481,7 @@ double estimate_flash_t(double p, double Q, vector<double> x, add_args &cppargs)
         if (water_iter != cppargs.e.end()) {
             water_idx = std::distance(cppargs.e.begin(), water_iter);
             cppargs.s[water_idx] = calc_sigma(t, &calc_water_sigma);
-            cppargs.dielc = dielc_water(t); // Right now only aqueous mixtures are supported for electrolyte PC-SAFT. Other solvents could be modeled by replacing the dielc_water function.
+            cppargs.dielc[water_idx] = dielc_water(t); // Right now only aqueous mixtures are supported for electrolyte PC-SAFT. Other solvents could be modeled by replacing the dielc_water function.
         }
 
         try {

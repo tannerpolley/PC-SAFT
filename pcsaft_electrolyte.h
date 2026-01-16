@@ -23,8 +23,11 @@ struct add_args {
     vector<double> vol_a;
     vector<double> dipm;
     vector<double> dip_num;
+    vector<double> MW;
     vector<double> z;
-    double dielc;
+    vector<double> dielc;
+    vector<double> d_born;
+    vector<double> f_solv;
     vector<int> assoc_num;
     vector<int> assoc_matrix;
     vector<double> k_hb;
