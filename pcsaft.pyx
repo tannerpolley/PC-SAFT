@@ -1414,6 +1414,7 @@ def np_to_vector_int(np_array):
 def create_struct(params):
     """Convert PC-SAFT parameters to a C++ struct."""
     cdef add_args cppargs
+    cppargs.born_model = 1
 
     cppargs.m = np_to_vector_double(params['m'])
     cppargs.s = np_to_vector_double(params['s'])
@@ -1438,6 +1439,8 @@ def create_struct(params):
         cppargs.d_born = np_to_vector_double(params['d_born'])
     if 'f_solv' in params:
         cppargs.f_solv = np_to_vector_double(params['f_solv'])
+    if 'born_model' in params:
+        cppargs.born_model = <int>params['born_model']
     if 'assoc_num' in params:
         cppargs.assoc_num = np_to_vector_int(params['assoc_num'])
     if 'assoc_matrix' in params:

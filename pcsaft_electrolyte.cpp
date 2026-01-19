@@ -20,50 +20,121 @@ using std::vector;
     #endif
 #endif
 
-double dielc_sum(vector<double> dielc, vector<double> x, vector<double> z, vector<double> MW) {
-
+double dielc_mix(vector<double> x, add_args &cppargs) {
 
     const std::size_t N = x.size();
-    if (dielc.size() != N || z.size() != N || MW.size() != N) {
+    if (cppargs.dielc.size() != N || cppargs.z.size() != N || cppargs.MW.size() != N) {
         throw std::invalid_argument("dielc_mixture: input size mismatch");
     }
 
-
-    // Identify solvents (z == 0)
-    double x_solv = 0.0;
-    std::vector<std::size_t> idx_solv;
+    // Salt-free solvent mixture dielectric (mass-fraction weighted)
+    double m_tot = 0.0;
+    double eps_solv_mix = 0.0;
+    double x_ion = 0.0;
     for (std::size_t i = 0; i < N; ++i) {
-        if (std::fabs(z[i]) < 1e-12) {  // solvent
-            idx_solv.push_back(i);
-            x_solv += x[i];
+        if (std::fabs(cppargs.z[i]) < 1e-12) {
+            m_tot += x[i] * cppargs.MW[i];
+        } else {
+            x_ion += x[i];
         }
     }
 
-    // Compute solvent-weighted dielectric average: Σ(ε_i * w_i^solv)
-    double solvent_mix = 0.0;
-    if (!idx_solv.empty() && x_solv > 0.0) {
-        // total solvent mass
-        double m_tot = 0.0;
-        for (auto i : idx_solv) {
-            m_tot += x[i] * MW[i];
-        }
-
-        for (auto i : idx_solv) {
-            const double w_i_solv = (x[i] * MW[i]) / m_tot;  // mass fraction within solvent pool
-            solvent_mix += dielc[i] * w_i_solv;
+    if (m_tot > 0.0) {
+        for (std::size_t i = 0; i < N; ++i) {
+            if (std::fabs(cppargs.z[i]) < 1e-12) {
+                double w_i = (x[i] * cppargs.MW[i]) / m_tot;
+                eps_solv_mix += cppargs.dielc[i] * w_i;
+            }
         }
     }
 
-    // Ionic contribution: Σ ε_i * x_i where |z| > 0
-    double ion_mix = 0.0;
-    for (std::size_t i = 0; i < N; ++i) {
-        if (std::fabs(z[i]) > 1e-12) {
-            ion_mix += dielc[i] * x[i];
-        }
+    // born_model = 0 => legacy (Bulow 2021); born_model = 1 => Figiel 2025 (SSM+DS)
+    if (cppargs.born_model == 0) {
+        return eps_solv_mix;
     }
-
-    return solvent_mix * x_solv + ion_mix;
+    return eps_solv_mix / (1.0 + 7.01 * x_ion);
 }
+
+double f_mix_value(vector<double> x, add_args &cppargs) {
+    if (cppargs.f_solv.empty()) {
+        return 1.0;
+    }
+    if (cppargs.f_solv.size() != x.size()) {
+        throw std::invalid_argument("f_solv: input size mismatch");
+    }
+    double f_mix = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        f_mix += x[i] * cppargs.f_solv[i];
+    }
+    return f_mix;
+}
+
+double ares_born_ssm_ds(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
+    if (cppargs.z.empty()) {
+        return 0.0;
+    }
+    const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
+    const double factor = (1.0 - 1.0 / dielc);
+    const double f_mix = f_mix_value(x, cppargs);
+
+    double S1 = 0.0;
+    double S2 = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        if (std::fabs(cppargs.z[i]) < 1e-12) {
+            continue;
+        }
+        double d_born = d[i];
+        if (!cppargs.d_born.empty()) {
+            d_born = cppargs.d_born[i];
+        }
+        if (d_born <= 0.0) {
+            continue;
+        }
+        double delta_d = f_mix * std::fabs(cppargs.z[i]) * d_born;
+        double d_eff = d_born + delta_d;
+        if (d_eff <= 0.0) {
+            continue;
+        }
+        const double z2 = cppargs.z[i] * cppargs.z[i];
+        S1 += x[i] * z2 / d_eff;
+        S2 += x[i] * z2 * (1.0 / d_born) * (1.0 / d_eff);
+    }
+
+    // Eq. 7 from Figiel 2025 (SSM + DS)
+    return -C0 / t * factor * S1 + factor * S2;
+}
+
+double ares_born_legacy(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
+    if (cppargs.z.empty()) {
+        return 0.0;
+    }
+    const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
+    const double factor = (1.0 - 1.0 / dielc);
+    double S = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        if (std::fabs(cppargs.z[i]) < 1e-12) {
+            continue;
+        }
+        double d_born = d[i];
+        if (!cppargs.d_born.empty()) {
+            d_born = cppargs.d_born[i];
+        }
+        if (d_born <= 0.0) {
+            continue;
+        }
+        const double z2 = cppargs.z[i] * cppargs.z[i];
+        S += x[i] * z2 / d_born;
+    }
+    return -C0 / t * factor * S;
+}
+
+double ares_born_model(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
+    if (cppargs.born_model == 0) {
+        return ares_born_legacy(t, x, cppargs, d, dielc);
+    }
+    return ares_born_ssm_ds(t, x, cppargs, d, dielc);
+}
+
 
 
 vector<double> XA_find(vector<double> XA_guess, vector<double> delta_ij, double den,
@@ -475,7 +546,7 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
 
     double Zion = 0;
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double dielc = dielc_mix(x, cppargs);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -956,7 +1027,7 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
 
     vector<double> mu_ion(ncomp, 0);
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double dielc = dielc_mix(x, cppargs);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -995,30 +1066,28 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
 
     vector<double> mu_born(ncomp, 0);
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
-        double summ = 0.;
-        for (int i = 0; i < ncomp; i++) {
-            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
-            }
-
-        double ares_born =  -pow(E_CHRG, 2) / (4. * PI * kb * t * perm_vac) * (1 - 1 / dielc) * summ;
+        double dielc = dielc_mix(x, cppargs);
+        double ares_born = ares_born_model(t, x, cppargs, d, dielc);
         double Zborn = 0;
 
+        // Numerical derivative of ares_born w.r.t. x_i (unconstrained)
+        const double h = 1e-8;
         vector<double> daborn_dx(ncomp, 0);
         for (int i = 0; i < ncomp; i++) {
-            daborn_dx[i] = - pow(E_CHRG, 2) / (4 * PI * kb * t * perm_vac) *
-                            ((1 - 1 / dielc) * (cppargs.z[i] * cppargs.z[i] / d[i]) + summ * (1/ (dielc * dielc)) * (cppargs.dielc[i]));
+            vector<double> x_pert = x;
+            x_pert[i] += h;
+            double dielc_pert = dielc_mix(x_pert, cppargs);
+            double ares_born_pert = ares_born_model(t, x_pert, cppargs, d, dielc_pert);
+            daborn_dx[i] = (ares_born_pert - ares_born) / h;
         }
 
         for (int i = 0; i < ncomp; i++) {
             for (int j = 0; j < ncomp; j++) {
-
-                mu_born[i] += x[j]*daborn_dx[j];
+                mu_born[i] += x[j] * daborn_dx[j];
             }
             if (cppargs.z[i] != 0) {
                 mu_born[i] = ares_born + Zborn + daborn_dx[i] - mu_born[i];
-            }
-            else {
+            } else {
                 mu_born[i] = 0;
             }
         }
@@ -1332,7 +1401,7 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
 
     double ares_ion = 0.;
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double dielc = dielc_mix(x, cppargs);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -1360,13 +1429,8 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
     // Born term ---------------------------------------------------------------
     double ares_born = 0;
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
-        double summ = 0.;
-        for (int i = 0; i < ncomp; i++) {
-            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
-            }
-
-        ares_born =  -pow(E_CHRG, 2) / (4. * PI * kb * t * perm_vac) * (1 - 1 / dielc) * summ;
+        double dielc = dielc_mix(x, cppargs);
+        ares_born = ares_born_model(t, x, cppargs, d, dielc);
     }
 
     double ares = ares_hc + ares_disp + ares_polar + ares_assoc + ares_ion + ares_born;
@@ -1678,7 +1742,7 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
 
     double dadt_ion = 0.;
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
+        double dielc = dielc_mix(x, cppargs);
         vector<double> q(cppargs.z.begin(), cppargs.z.end());
         for (int i = 0; i < ncomp; i++) {
             q[i] = q[i]*E_CHRG;
@@ -1716,12 +1780,36 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
 
     double dadt_born = 0.;
     if (!cppargs.z.empty()) {
-        double dielc = dielc_sum(cppargs.dielc, x, cppargs.z, cppargs.MW);
-        double summ = 0.;
+        double dielc = dielc_mix(x, cppargs);
+        const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
+        const double factor = (1.0 - 1.0 / dielc);
+        const double f_mix = f_mix_value(x, cppargs);
+
+        double S1 = 0.0;
         for (int i = 0; i < ncomp; i++) {
-            summ += x[i] * cppargs.z[i] * cppargs.z[i] / d[i];
+            if (std::fabs(cppargs.z[i]) < 1e-12) {
+                continue;
             }
-        dadt_born = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac * t * t) * (1 - 1 / dielc) * summ;
+            double d_born = d[i];
+            if (!cppargs.d_born.empty()) {
+                d_born = cppargs.d_born[i];
+            }
+            if (d_born <= 0.0) {
+                continue;
+            }
+            if (cppargs.born_model == 0) {
+                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_born;
+            } else {
+                double delta_d = f_mix * std::fabs(cppargs.z[i]) * d_born;
+                double d_eff = d_born + delta_d;
+                if (d_eff <= 0.0) {
+                    continue;
+                }
+                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_eff;
+            }
+        }
+
+        dadt_born = C0 / (t * t) * factor * S1;
 
     }
 
@@ -2918,3 +3006,5 @@ double BoundedSecantInner(double kb0, double Q, vector<double> u, vector<double>
     }
     return x3;
 }
+
+

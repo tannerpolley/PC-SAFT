@@ -28,6 +28,7 @@ struct add_args {
     vector<double> dielc;
     vector<double> d_born;
     vector<double> f_solv;
+    int born_model;
     vector<int> assoc_num;
     vector<int> assoc_matrix;
     vector<double> k_hb;
