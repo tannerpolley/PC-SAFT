@@ -1,5 +1,5 @@
 import numpy as np
-from pcsaft import pcsaft_den
+from pcsaft import pcsaft_lnfugcoef, pcsaft_den
 
 # Toluene
 x = np.asarray([1.])
@@ -10,8 +10,8 @@ pyargs = {'m':m, 's':s, 'e':e}
 
 t = 320 # K
 p = 101325 # Pa
-den = pcsaft_den(t, p, x, pyargs, phase='liq')
-print('Density of toluene at {} K:'.format(t), den, 'mol m^-3')
+lnphi = pcsaft_den(t, p, x, pyargs, phase='liq')
+print('ln(phi) of toluene at {} K:'.format(t), lnphi)
 
 # Water using default 2B association scheme
 x = np.asarray([1.])
@@ -24,8 +24,8 @@ t = 274
 p = 101325
 s = np.asarray([2.7927 + 10.11*np.exp(-0.01775*t) - 1.417*np.exp(-0.01146*t)]) # temperature dependent sigma is used for better accuracy
 pyargs = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB}
-den = pcsaft_den(t, p, x, pyargs, phase='liq')
-print('Density of water at {} K:'.format(t), den, 'mol m^-3')
+lnphi = pcsaft_lnfugcoef(t, p, x, pyargs)
+print('ln(phi) of water at {} K:'.format(t), lnphi[0])
 
 # Water using 4C association scheme
 x = np.asarray([1.])
@@ -39,5 +39,5 @@ t = 274
 p = 101325
 s = np.asarray([2.7927 + 10.11*np.exp(-0.01775*t) - 1.417*np.exp(-0.01146*t)]) # temperature dependent sigma is used for better accuracy
 pyargs = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'assoc_scheme':assoc_schemes}
-den = pcsaft_den(t, p, x, pyargs, phase='liq')
-print('Density of water at {} K:'.format(t), den, 'mol m^-3')
+lnphi = pcsaft_lnfugcoef(t, p, x, pyargs)
+print('ln(phi) of water at {} K:'.format(t), lnphi[0])

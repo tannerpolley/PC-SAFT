@@ -9,6 +9,9 @@ from .pcsaft import pcsaft_sres
 from .pcsaft import pcsaft_gres
 from .pcsaft import pcsaft_lnfugcoef
 from .pcsaft import pcsaft_fugcoef
+from .pcsaft import pcsaft_lnfugcoef_inf_dil
+from .pcsaft import pcsaft_fugcoef_inf_dil
+from .pcsaft import pcsaft_actcoeff
 from .pcsaft import pcsaft_Z
 from .pcsaft import pcsaft_ares
 from .pcsaft import pcsaft_dadt

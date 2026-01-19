@@ -28,13 +28,13 @@ def test_hres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -36809.39 # J mol^-1
-    calc = pcsaft_hres(t, den, x, params)
+    calc = pcsaft_hres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -362.6777 # J mol^-1
-    calc = pcsaft_hres(t, den, x, params)
+    calc = pcsaft_hres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -49,13 +49,13 @@ def test_hres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -38924.64 # J mol^-1
-    calc = pcsaft_hres(t, den, x, params)
+    calc = pcsaft_hres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -15393.63 # J mol^-1
-    calc = pcsaft_hres(t, den, x, params)
+    calc = pcsaft_hres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -79,13 +79,13 @@ def test_sres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -96.3692 # J mol^-1 K^-1
-    calc = pcsaft_sres(t, den, x, params)
+    calc = pcsaft_sres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol/K')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -0.71398 # J mol^-1 K^-1
-    calc = pcsaft_sres(t, den, x, params)
+    calc = pcsaft_sres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol/K')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -100,13 +100,13 @@ def test_sres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -98.1127 # J mol^-1 K^-1
-    calc = pcsaft_sres(t, den, x, params)
+    calc = pcsaft_sres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol/K')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -40.8743 # J mol^-1 K^-1
-    calc = pcsaft_sres(t, den, x, params)
+    calc = pcsaft_sres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol/K')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -130,13 +130,13 @@ def test_gres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -5489.384 # J mol^-1
-    calc = pcsaft_gres(t, den, x, params)
+    calc = pcsaft_gres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -130.6339 # J mol^-1
-    calc = pcsaft_gres(t, den, x, params)
+    calc = pcsaft_gres(t, den, x, params, input='rho')
     if print_result:
         print('Toluene, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -151,13 +151,13 @@ def test_gres(print_result=False):
 
     den = pcsaft_den(t, p, x, params, phase='liq')
     ref = -7038.004 # J mol^-1
-    calc = pcsaft_gres(t, den, x, params)
+    calc = pcsaft_gres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, liquid:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
     den = pcsaft_den(t, p, x, params, phase='vap')
     ref = -2109.459 # J mol^-1
-    calc = pcsaft_gres(t, den, x, params)
+    calc = pcsaft_gres(t, den, x, params, input='rho')
     if print_result:
         print('Acetic acid, vapor:\t\t', calc, ref, (calc-ref)/ref*100, 'J/mol')
     assert abs((calc-ref)/ref*100) < 1e-2
@@ -389,7 +389,7 @@ def test_indexes(print_result=False):
     ref = 193261.515187248 # source: DIPPR correlation
     t = 413.5385
     rho = 15107.481234283325
-    fugcoef1 = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef1 = pcsaft_fugcoef(t, rho, x, params, input='rho')
 
     # same composition, but with mixture parameters
     #0 = water, 1 = acetic acid
@@ -404,7 +404,7 @@ def test_indexes(print_result=False):
     x = np.asarray([0, 1])
     s[0] = 3.8395 + 1.2828*np.exp(-0.0074944*t) - 1.3939*np.exp(-0.00056029*t)
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'k_ij':k_ij}
-    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params, input='rho')
     if print_result:
         print('\n##########  Test with acetic acid  ##########')
         print('pure fugcoef:', fugcoef1[0])
@@ -425,7 +425,7 @@ def test_indexes(print_result=False):
     t = 400 # K
     p = 34914.37778265716 # Pa
     rho = 10899.584105341197
-    fugcoef1 = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef1 = pcsaft_fugcoef(t, rho, x, params, input='rho')
 
     # same composition, but with mixture parameters
     #0 = water, 1 = furfural
@@ -442,7 +442,7 @@ def test_indexes(print_result=False):
     x = np.asarray([0, 1])
     s[0] = 3.8395 + 1.2828*np.exp(-0.0074944*t) - 1.3939*np.exp(-0.00056029*t)
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'dipm':dipm, 'dip_num':dip_num, 'k_ij':k_ij}
-    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params, input='rho')
     if print_result:
         print('\n##########  Test with furfural  ##########')
         print('pure fugcoef:', fugcoef1[0])
@@ -465,7 +465,7 @@ def test_indexes(print_result=False):
 
     p = 3153.417688548272 # Pa
     rho = 55320.89616248148
-    fugcoef1 = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef1 = pcsaft_fugcoef(t, rho, x, params, input='rho')
 
     # same composition, but with mixture parameters
     # Mixture: NaCl in water with random 4th component
@@ -489,7 +489,7 @@ def test_indexes(print_result=False):
 
     s[2] = 3.8395 + 1.2828*np.exp(-0.0074944*t) - 1.3939*np.exp(-0.00056029*t)
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'dipm':dipm, 'dip_num':dip_num, 'k_ij':k_ij, 'z':z, 'dielc':dielc}
-    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params)
+    fugcoef_mix = pcsaft_fugcoef(t, rho, x, params, input='rho')
     if print_result:
         print('\n##########  Test with water  ##########')
         print('pure fugcoef:', fugcoef1[0])
@@ -998,7 +998,7 @@ def test_osmoticC(print_result=False):
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'k_ij':k_ij, 'z':z, 'dielc':dielc}
 
     rho = pcsaft_den(t, 2339.3, x, params, phase='liq')
-    result = pcsaft_osmoticC(t, rho, x, params)
+    result = pcsaft_osmoticC(t, rho, x, params, input='rho')
     calc = result[0]
     if print_result:
         print('\n##########  Test with aqueous NaCl  ##########')
@@ -1082,11 +1082,11 @@ def test_dadt(print_result=False):
     t = 330.
 
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    dadt_eos = pcsaft_dadt(t, rho, x, params)
+    dadt_eos = pcsaft_dadt(t, rho, x, params, input='rho')
 
     # calculating numerical derivative
-    der1 = pcsaft_ares(t-1, rho, x, params)
-    der2 = pcsaft_ares(t+1, rho, x, params)
+    der1 = pcsaft_ares(t-1, rho, x, params, input='rho')
+    der2 = pcsaft_ares(t+1, rho, x, params, input='rho')
     dadt_num = (der2-der1)/2.
     if print_result:
         print('\n##########  Test with toluene  ##########')
@@ -1107,11 +1107,11 @@ def test_dadt(print_result=False):
     t = 310.
 
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    dadt_eos = pcsaft_dadt(t, rho, x, params)
+    dadt_eos = pcsaft_dadt(t, rho, x, params, input='rho')
 
     # calculating numerical derivative
-    der1 = pcsaft_ares(t-1, rho, x, params)
-    der2 = pcsaft_ares(t+1, rho, x, params)
+    der1 = pcsaft_ares(t-1, rho, x, params, input='rho')
+    der2 = pcsaft_ares(t+1, rho, x, params, input='rho')
     dadt_num = (der2-der1)/2.
     if print_result:
         print('\n##########  Test with acetic acid  ##########')
@@ -1133,11 +1133,11 @@ def test_dadt(print_result=False):
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB}
 
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    dadt_eos = pcsaft_dadt(t, rho, x, params)
+    dadt_eos = pcsaft_dadt(t, rho, x, params, input='rho')
 
     # calculating numerical derivative
-    der1 = pcsaft_ares(t-1, rho, x, params)
-    der2 = pcsaft_ares(t+1, rho, x, params)
+    der1 = pcsaft_ares(t-1, rho, x, params, input='rho')
+    der2 = pcsaft_ares(t+1, rho, x, params, input='rho')
     dadt_num = (der2-der1)/2.
     if print_result:
         print('\n##########  Test with water  ##########')
@@ -1158,11 +1158,11 @@ def test_dadt(print_result=False):
     t = 370.
 
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    dadt_eos = pcsaft_dadt(t, rho, x, params)
+    dadt_eos = pcsaft_dadt(t, rho, x, params, input='rho')
 
     # calculating numerical derivative
-    der1 = pcsaft_ares(t-1, rho, x, params)
-    der2 = pcsaft_ares(t+1, rho, x, params)
+    der1 = pcsaft_ares(t-1, rho, x, params, input='rho')
+    der2 = pcsaft_ares(t+1, rho, x, params, input='rho')
     dadt_num = (der2-der1)/2.
     if print_result:
         print('\n##########  Test with dimethyl ether  ##########')
@@ -1194,11 +1194,11 @@ def test_dadt(print_result=False):
     params = {'m':m, 's':s, 'e':e, 'e_assoc':eAB, 'vol_a':volAB, 'k_ij':k_ij, 'z':z, 'dielc':dielc}
 
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    dadt_eos = pcsaft_dadt(t, rho, x, params)
+    dadt_eos = pcsaft_dadt(t, rho, x, params, input='rho')
 
     # calculating numerical derivative
-    der1 = pcsaft_ares(t-1, rho, x, params)
-    der2 = pcsaft_ares(t+1, rho, x, params)
+    der1 = pcsaft_ares(t-1, rho, x, params, input='rho')
+    der2 = pcsaft_ares(t+1, rho, x, params, input='rho')
     dadt_num = (der2-der1)/2.
     if print_result:
         print('\n##########  Test with aqueous NaCl  ##########')
@@ -1222,7 +1222,7 @@ def test_cp(print_result=False):
     p = 100000.
     t = 330.
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    calc = pcsaft_cp(t, rho, cnsts, x, params)
+    calc = pcsaft_cp(t, rho, cnsts, x, params, input='rho')
     if print_result:
         print('\n##########  Test with benzene  ##########')
         print('----- Heat capacity at 330 K -----')
@@ -1243,7 +1243,7 @@ def test_cp(print_result=False):
     p = 100000.
     t = 370.
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    calc = pcsaft_cp(t, rho, cnsts, x, params)
+    calc = pcsaft_cp(t, rho, cnsts, x, params, input='rho')
     if print_result:
         print('\n##########  Test with toluene  ##########')
         print('----- Heat capacity at 370 K -----')
@@ -1266,7 +1266,7 @@ def test_cp(print_result=False):
     # p = 100000.
     # t = 325.
     # rho = pcsaft_den(t, p, x, params, phase='liq')
-    # calc = pcsaft_cp(t, rho, cnsts, x, params)
+    # calc = pcsaft_cp(t, rho, cnsts, x, params, input='rho')
     # """ Note: Large deviations occur with acetic acid and water. This behavior
     # has been observed before and was described in R. T. C. S. Ribeiro, A. L.
     # Alberton, M. L. L. Paredes, G. M. Kontogeorgis, and X. Liang, “Extensive
@@ -1291,7 +1291,7 @@ def test_cp(print_result=False):
     p = 100000.
     t = 240.
     rho = pcsaft_den(t, p, x, params, phase='liq')
-    calc = pcsaft_cp(t, rho, cnsts, x, params)
+    calc = pcsaft_cp(t, rho, cnsts, x, params, input='rho')
     if print_result:
         print('\n##########  Test with dimethyl ether  ##########')
         print('----- Heat capacity at 240 K -----')

@@ -142,6 +142,16 @@ def ensure_numpy_input(x, params):
         params['e'] = np.asarray([params['e']])
     return x, params
 
+
+def _resolve_rho(t, p_or_rho, x, params, phase='liq', input='p'):
+    if input == 'p':
+        check_input(x, {'temperature': t, 'pressure': p_or_rho})
+        return pcsaft_den(t, p_or_rho, x, params, phase=phase)
+    if input == 'rho':
+        check_input(x, {'temperature': t, 'density': p_or_rho})
+        return p_or_rho
+    raise InputError("input must be 'p' or 'rho'. input = {}".format(input))
+
 def pcsaft_p(t, rho, x, params):
     """
     Calculate pressure.
@@ -213,7 +223,7 @@ def pcsaft_p(t, rho, x, params):
         _raise_solution_error('pcsaft_p', exc)
 
 
-def pcsaft_lnfugcoef(t, rho, x, params):
+def pcsaft_lnfugcoef(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the natural logarithm of the fugacity coefficients for one phase of the system.
 
@@ -221,8 +231,8 @@ def pcsaft_lnfugcoef(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -274,17 +284,17 @@ def pcsaft_lnfugcoef(t, rho, x, params):
         Natural logarithm of the fugacity coefficients for each component.
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return np.asarray(pcsaft_lnfug_cpp(t, rho, x, cppargs))
     except Exception as exc:
         _raise_solution_error('pcsaft_lnfugcoef', exc)
 
 
-def pcsaft_fugcoef(t, rho, x, params):
+def pcsaft_fugcoef(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the fugacity coefficients for one phase of the system.
 
@@ -292,8 +302,8 @@ def pcsaft_fugcoef(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -345,17 +355,17 @@ def pcsaft_fugcoef(t, rho, x, params):
         Fugacity coefficients of each component.
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
     except Exception as exc:
         _raise_solution_error('pcsaft_fugcoef', exc)
 
 
-def pcsaft_Z(t, rho, x, params):
+def pcsaft_Z(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the compressibility factor.
 
@@ -363,8 +373,8 @@ def pcsaft_Z(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -416,11 +426,11 @@ def pcsaft_Z(t, rho, x, params):
         Compressibility factor
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_Z_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_Z', exc)
@@ -712,7 +722,7 @@ def pcsaft_Hvap(t, x, params, p_guess=None):
     return output
 
 
-def pcsaft_osmoticC(t, rho, x, params):
+def pcsaft_osmoticC(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the osmotic coefficient.
 
@@ -720,8 +730,8 @@ def pcsaft_osmoticC(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -773,10 +783,12 @@ def pcsaft_osmoticC(t, rho, x, params):
         Molal osmotic coefficient
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
+
+    rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+    p = p_or_rho if input == 'p' else pcsaft_p_cpp(t, rho, x, cppargs)
 
     indx_water = np.where(params['e'] == 353.9449)[0] # to find index for water
     molality = x/(x[indx_water]*18.0153/1000.)
@@ -786,7 +798,6 @@ def pcsaft_osmoticC(t, rho, x, params):
 
     try:
         fugcoef = np.asarray(pcsaft_fugcoef_cpp(t, rho, x, cppargs))
-        p = pcsaft_p_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_osmoticC', exc)
     if rho < 900:
@@ -803,7 +814,7 @@ def pcsaft_osmoticC(t, rho, x, params):
     osmC = -1000*np.log(x[indx_water]*gamma)/18.0153/np.sum(molality)
     return osmC
 
-def pcsaft_cp(t, rho, aly_lee_params, x, params):
+def pcsaft_cp(t, p_or_rho, aly_lee_params, x, params, phase='liq', input='p'):
     """
     Calculate the specific molar isobaric heat capacity.
 
@@ -811,8 +822,8 @@ def pcsaft_cp(t, rho, aly_lee_params, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     aly_lee_params : ndarray, shape (5,)
         Constants for the Aly-Lee equation. Can be substituted with parameters for
         another equation if the ideal gas heat capacity is given using a different
@@ -868,20 +879,17 @@ def pcsaft_cp(t, rho, aly_lee_params, x, params):
         Specific molar isobaric heat capacity (J mol\ :sup:`-1` K\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
 
-    if rho > 900:
-        ph = 0
-    else:
-        ph = 1
+    ph = 0 if phase == 'liq' else 1
 
     cppargs = create_struct(params)
+    rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+    p = p_or_rho if input == 'p' else pcsaft_p_cpp(t, rho, x, cppargs)
 
     cp_ideal = aly_lee(t, aly_lee_params)
     try:
-        p = pcsaft_p_cpp(t, rho, x, cppargs)
         rho0 = pcsaft_den_cpp(t-0.001, p, x, ph, cppargs)
         hres0 = pcsaft_hres_cpp(t-0.001, rho0, x, cppargs)
         rho1 = pcsaft_den_cpp(t+0.001, p, x, ph, cppargs)
@@ -972,7 +980,7 @@ def pcsaft_den(t, p, x, params, phase='liq'):
         _raise_solution_error('pcsaft_den', exc)
 
 
-def pcsaft_hres(t, rho, x, params):
+def pcsaft_hres(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the residual enthalpy for one phase of the system.
 
@@ -980,8 +988,8 @@ def pcsaft_hres(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -1033,16 +1041,16 @@ def pcsaft_hres(t, rho, x, params):
         Residual enthalpy (J mol\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_hres_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_hres', exc)
 
-def pcsaft_sres(t, rho, x, params):
+def pcsaft_sres(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the residual entropy (constant volume) for one phase of the system.
 
@@ -1050,8 +1058,8 @@ def pcsaft_sres(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -1103,16 +1111,16 @@ def pcsaft_sres(t, rho, x, params):
         Residual entropy (J mol\ :sup:`-1` K\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_sres_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_sres', exc)
 
-def pcsaft_gres(t, rho, x, params):
+def pcsaft_gres(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the residual Gibbs energy for one phase of the system.
 
@@ -1120,8 +1128,8 @@ def pcsaft_gres(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -1173,17 +1181,17 @@ def pcsaft_gres(t, rho, x, params):
         Residual Gibbs energy (J mol\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_gres_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_gres', exc)
 
 
-def pcsaft_ares(t, rho, x, params):
+def pcsaft_ares(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the residual Helmholtz energy.
 
@@ -1191,8 +1199,8 @@ def pcsaft_ares(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -1244,17 +1252,17 @@ def pcsaft_ares(t, rho, x, params):
         Residual Helmholtz energy (J mol\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_ares_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_ares', exc)
 
 
-def pcsaft_dadt(t, rho, x, params):
+def pcsaft_dadt(t, p_or_rho, x, params, phase='liq', input='p'):
     """
     Calculate the temperature derivative of the residual Helmholtz energy.
 
@@ -1262,8 +1270,8 @@ def pcsaft_dadt(t, rho, x, params):
     ----------
     t : float
         Temperature (K)
-    rho : float
-        Molar density (mol m\ :sup:`-3`)
+    p_or_rho : float
+        Pressure (Pa) if input='p' (default), otherwise molar density (mol m\ :sup:`-3`)
     x : ndarray, shape (n,)
         Mole fractions of each component. It has a length of n, where n is
         the number of components in the system.
@@ -1315,14 +1323,89 @@ def pcsaft_dadt(t, rho, x, params):
         Temperature derivative of the residual Helmholtz energy (J mol\ :sup:`-1`)
     """
     x, params = ensure_numpy_input(x, params)
-    check_input(x, {'density':rho, 'temperature':t})
     params = check_association(params)
     validate_params(x, params)
     cppargs = create_struct(params)
     try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
         return pcsaft_dadt_cpp(t, rho, x, cppargs)
     except Exception as exc:
         _raise_solution_error('pcsaft_dadt', exc)
+
+
+def pcsaft_lnfugcoef_inf_dil(t, p_or_rho, x, params, phase='liq', input='p', eps=1e-12):
+    """
+    Infinite-dilution ln(fugacity coefficients) for solutes in a given solvent.
+
+    Assumes the first component is the solvent and all others are solutes.
+    Returns ln(phi) for the solvent at x_solvent=1 and solutes at infinite dilution.
+    """
+    x, params = ensure_numpy_input(x, params)
+    check_input(x, {'temperature': t})
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    n = len(x)
+    if n < 1:
+        raise InputError('The composition array must have at least one component.')
+    try:
+        # solvent reference (pure solvent)
+        x_solvent = np.zeros(n)
+        x_solvent[0] = 1.0
+        rho_solvent = _resolve_rho(t, p_or_rho, x_solvent, params, phase=phase, input=input)
+        lnphi_solvent = np.asarray(pcsaft_lnfug_cpp(t, rho_solvent, x_solvent, cppargs))
+
+        lnphi_inf = np.zeros(n, dtype=float)
+        lnphi_inf[0] = lnphi_solvent[0]
+        # solutes at infinite dilution in solvent
+        for i in range(1, n):
+            x_ref = np.zeros(n)
+            x_ref[0] = 1.0 - eps
+            x_ref[i] = eps
+            rho_ref = _resolve_rho(t, p_or_rho, x_ref, params, phase=phase, input=input)
+            lnphi_ref = np.asarray(pcsaft_lnfug_cpp(t, rho_ref, x_ref, cppargs))
+            lnphi_inf[i] = lnphi_ref[i]
+        return lnphi_inf
+    except Exception as exc:
+        _raise_solution_error('pcsaft_lnfugcoef_inf_dil', exc)
+
+
+def pcsaft_fugcoef_inf_dil(t, p_or_rho, x, params, phase='liq', input='p', eps=1e-12):
+    """
+    Infinite-dilution fugacity coefficients for solutes in a given solvent.
+
+    Assumes the first component is the solvent and all others are solutes.
+    Returns phi for the solvent at x_solvent=1 and solutes at infinite dilution.
+    """
+    try:
+        return np.exp(pcsaft_lnfugcoef_inf_dil(t, p_or_rho, x, params, phase=phase, input=input, eps=eps))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_fugcoef_inf_dil', exc)
+
+
+def pcsaft_actcoeff(t, p_or_rho, x, params, phase='liq', input='p', eps=1e-12):
+    """
+    Activity coefficients assuming the first component is the solvent and
+    solutes are referenced at infinite dilution in that solvent.
+
+    ln(gamma_i) = ln(phi_i(x)) - ln(phi_i^inf)
+    """
+    x, params = ensure_numpy_input(x, params)
+    check_input(x, {'temperature': t})
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    n = len(x)
+    if n < 1:
+        raise InputError('The composition array must have at least one component.')
+    try:
+        # lnphi at mixture
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        lnphi = np.asarray(pcsaft_lnfug_cpp(t, rho, x, cppargs))
+        lnphi_inf = pcsaft_lnfugcoef_inf_dil(t, p_or_rho, x, params, phase=phase, input=input, eps=eps)
+        return np.exp(lnphi - lnphi_inf)
+    except Exception as exc:
+        _raise_solution_error('pcsaft_actcoeff', exc)
 
 
 def aly_lee(t, c):

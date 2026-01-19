@@ -22,7 +22,10 @@ Functions
    pcsaft_sres
    pcsaft_gres
    pcsaft_fugcoef
+   pcsaft_fugcoef_inf_dil
    pcsaft_Z
+   pcsaft_lnfugcoef_inf_dil
+   pcsaft_actcoeff
    pcsaft_ares
    pcsaft_dadt
    aly_lee
