@@ -3,8 +3,6 @@
 #include <cmath>
 #include <iostream>
 #include <iomanip>
-#include <sstream>
-#include <algorithm>
 using namespace std;
 #include "math.h"
 #include "externals/eigen/Eigen/Dense"
@@ -45,25 +43,17 @@ double dielc_mix(vector<double> x, add_args &cppargs) {
     }
 
     double eps_x = 0.0;
-    double eps_ion = 0.0;
     double eps_w = 0.0;
-    double eps_solv_mix_sf = 0.0;
-    double eps_solv_mix_present = 0.0;
+    double eps_solv_mix = 0.0;
     if (m_tot > 0.0) {
         for (std::size_t i = 0; i < N; ++i) {
             double w_i = (x[i] * cppargs.MW[i]) / m_tot;
             eps_x += cppargs.dielc[i] * x[i];
             eps_w += cppargs.dielc[i] * w_i;
-            if (std::fabs(cppargs.z[i]) > 1e-12) {
-                eps_ion += cppargs.dielc[i] * x[i];
-            }
         }
     } else {
         for (std::size_t i = 0; i < N; ++i) {
             eps_x += cppargs.dielc[i] * x[i];
-            if (std::fabs(cppargs.z[i]) > 1e-12) {
-                eps_ion += cppargs.dielc[i] * x[i];
-            }
         }
     }
 
@@ -71,15 +61,7 @@ double dielc_mix(vector<double> x, add_args &cppargs) {
         for (std::size_t i = 0; i < N; ++i) {
             if (std::fabs(cppargs.z[i]) < 1e-12) {
                 double w_i_sol = (x[i] * cppargs.MW[i]) / m_sol;
-                eps_solv_mix_sf += cppargs.dielc[i] * w_i_sol;
-            }
-        }
-    }
-    if (m_tot > 0.0) {
-        for (std::size_t i = 0; i < N; ++i) {
-            if (std::fabs(cppargs.z[i]) < 1e-12) {
-                double w_i_tot = (x[i] * cppargs.MW[i]) / m_tot;
-                eps_solv_mix_present += cppargs.dielc[i] * w_i_tot;
+                eps_solv_mix += cppargs.dielc[i] * w_i_sol;
             }
         }
     }
@@ -96,10 +78,10 @@ double dielc_mix(vector<double> x, add_args &cppargs) {
         return eps_w;
     }
     if (rule == 3) {
-        return eps_solv_mix_sf * x_sol + eps_ion;
+        return eps_solv_mix * x_sol + eps_x;
     }
     if (rule == 4) {
-        return eps_solv_mix_sf / (1.0 + 7.01 * x_ion);
+        return eps_solv_mix / (1.0 + 7.01 * x_ion);
     }
     throw std::invalid_argument("dielc_mixture: unknown dielc_rule");
 }
@@ -163,54 +145,35 @@ vector<double> dielc_mix_dx(vector<double> x, add_args &cppargs) {
             throw std::invalid_argument("dielc_mixture: no solvent mass for rule 3/4");
         }
 
-        double eps_solv_mix_sf = 0.0;
-        double eps_solv_mix_present = 0.0;
+        double eps_solv_mix = 0.0;
         for (int i = 0; i < N; i++) {
             if (is_solvent[i]) {
                 double w_i_sol = mass[i] / sum_mass_sol;
-                eps_solv_mix_sf += cppargs.dielc[i] * w_i_sol;
-                if (sum_mass > 0.0) {
-                    double w_i_tot = mass[i] / sum_mass;
-                    eps_solv_mix_present += cppargs.dielc[i] * w_i_tot;
-                }
+                eps_solv_mix += cppargs.dielc[i] * w_i_sol;
             }
         }
 
         for (int n = 0; n < N; n++) {
-            double Mn = cppargs.MW[n];
-            double d_eps_solv_mix_sf = 0.0;
-            double d_eps_solv_mix_present = 0.0;
+            double d_eps_solv_mix = 0.0;
             if (is_solvent[n]) {
+                double Mn = cppargs.MW[n];
                 for (int j = 0; j < N; j++) {
                     if (!is_solvent[j]) {
                         continue;
                     }
                     double dWj_dxn = (((j == n) ? Mn : 0.0) * sum_mass_sol - mass[j] * Mn) / (sum_mass_sol * sum_mass_sol);
-                    d_eps_solv_mix_sf += cppargs.dielc[j] * dWj_dxn;
-                }
-            }
-            if (sum_mass > 0.0) {
-                for (int j = 0; j < N; j++) {
-                    if (!is_solvent[j]) {
-                        continue;
-                    }
-                    double dWj_dxn = (((j == n) ? Mn : 0.0) * sum_mass - mass[j] * Mn) / (sum_mass * sum_mass);
-                    d_eps_solv_mix_present += cppargs.dielc[j] * dWj_dxn;
+                    d_eps_solv_mix += cppargs.dielc[j] * dWj_dxn;
                 }
             }
 
             if (rule == 3) {
-                if (is_solvent[n]) {
-                    deps_dx[n] = eps_solv_mix_sf + x_sol * d_eps_solv_mix_sf;
-                } else {
-                    deps_dx[n] = cppargs.dielc[n];
-                }
+                deps_dx[n] = cppargs.dielc[n] + eps_solv_mix * (is_solvent[n] ? 1.0 : 0.0) + x_sol * d_eps_solv_mix;
             } else {
                 double denom = 1.0 + 7.01 * x_ion;
                 if (is_solvent[n]) {
-                    deps_dx[n] = d_eps_solv_mix_sf / denom;
+                    deps_dx[n] = d_eps_solv_mix / denom;
                 } else {
-                    deps_dx[n] = eps_solv_mix_sf * (-7.01) / (denom * denom);
+                    deps_dx[n] = eps_solv_mix * (-7.01) / (denom * denom);
                 }
             }
         }
@@ -220,271 +183,7 @@ vector<double> dielc_mix_dx(vector<double> x, add_args &cppargs) {
     throw std::invalid_argument("dielc_mixture: unknown dielc_rule");
 }
 
-struct MixState {
-    int ncomp;
-    vector<double> d;
-    double den;
-    vector<double> zeta;
-    double eta;
-    double m_avg;
-};
-
-struct PairMix {
-    vector<double> ghs;
-    vector<double> denghs;
-    vector<double> s_ij;
-    vector<double> e_ij;
-    double m2es3;
-    double m2e2s3;
-};
-
-struct DispersionCoeffs {
-    vector<double> a;
-    vector<double> b;
-    vector<double> a1;
-    vector<double> a2;
-    vector<double> b1;
-    vector<double> b2;
-    double I1;
-    double I2;
-    double detI1_det;
-    double detI2_det;
-    double C1;
-    double C2;
-};
-
-struct AssocState {
-    int num_sites;
-    vector<int> iA;
-    vector<double> x_assoc;
-    vector<double> delta_ij;
-    vector<double> XA;
-};
-
-static vector<double> build_diameter(double t, const add_args &cppargs) {
-    int ncomp = cppargs.m.size();
-    vector<double> d(ncomp);
-    for (int i = 0; i < ncomp; i++) {
-        d[i] = cppargs.s[i] * (1 - 0.12 * exp(-3 * cppargs.e[i] / t));
-    }
-    if (!cppargs.z.empty()) {
-        for (int i = 0; i < ncomp; i++) {
-            if (cppargs.z[i] != 0) {
-                d[i] = cppargs.s[i] * (1 - 0.12);
-            }
-        }
-    }
-    return d;
-}
-
-static MixState build_mix_state(double t, double rho, const vector<double> &x, const add_args &cppargs) {
-    MixState ms;
-    ms.ncomp = x.size();
-    ms.d = build_diameter(t, cppargs);
-    ms.den = rho * N_AV / 1.0e30;
-    ms.zeta.assign(4, 0.0);
-    for (int i = 0; i < 4; i++) {
-        double summ = 0.0;
-        for (int j = 0; j < ms.ncomp; j++) {
-            summ += x[j] * cppargs.m[j] * pow(ms.d[j], i);
-        }
-        ms.zeta[i] = PI / 6 * ms.den * summ;
-    }
-    ms.eta = ms.zeta[3];
-    ms.m_avg = 0.0;
-    for (int i = 0; i < ms.ncomp; i++) {
-        ms.m_avg += x[i] * cppargs.m[i];
-    }
-    return ms;
-}
-
-static PairMix build_pair_mix(const MixState &ms, double t, const vector<double> &x, const add_args &cppargs) {
-    PairMix pm;
-    pm.ghs.assign(ms.ncomp * ms.ncomp, 0.0);
-    pm.denghs.assign(ms.ncomp * ms.ncomp, 0.0);
-    pm.e_ij.assign(ms.ncomp * ms.ncomp, 0.0);
-    pm.s_ij.assign(ms.ncomp * ms.ncomp, 0.0);
-    pm.m2es3 = 0.0;
-    pm.m2e2s3 = 0.0;
-
-    int idx = -1;
-    for (int i = 0; i < ms.ncomp; i++) {
-        for (int j = 0; j < ms.ncomp; j++) {
-            idx += 1;
-            if (cppargs.l_ij.empty()) {
-                pm.s_ij[idx] = (cppargs.s[i] + cppargs.s[j]) / 2.;
-            } else {
-                pm.s_ij[idx] = (cppargs.s[i] + cppargs.s[j]) / 2. * (1 - cppargs.l_ij[idx]);
-            }
-            if (!cppargs.z.empty()) {
-                if (cppargs.z[i] * cppargs.z[j] <= 0) {
-                    if (cppargs.k_ij.empty()) {
-                        pm.e_ij[idx] = sqrt(cppargs.e[i] * cppargs.e[j]);
-                    } else {
-                        pm.e_ij[idx] = sqrt(cppargs.e[i] * cppargs.e[j]) * (1 - cppargs.k_ij[idx]);
-                    }
-                }
-            } else {
-                if (cppargs.k_ij.empty()) {
-                    pm.e_ij[idx] = sqrt(cppargs.e[i] * cppargs.e[j]);
-                } else {
-                    pm.e_ij[idx] = sqrt(cppargs.e[i] * cppargs.e[j]) * (1 - cppargs.k_ij[idx]);
-                }
-            }
-            pm.m2es3 += x[i] * x[j] * cppargs.m[i] * cppargs.m[j] * pm.e_ij[idx] / t * pow(pm.s_ij[idx], 3);
-            pm.m2e2s3 += x[i] * x[j] * cppargs.m[i] * cppargs.m[j] * pow(pm.e_ij[idx] / t, 2) * pow(pm.s_ij[idx], 3);
-            pm.ghs[idx] = 1 / (1 - ms.zeta[3]) + (ms.d[i] * ms.d[j] / (ms.d[i] + ms.d[j])) * 3 * ms.zeta[2] /
-                (1 - ms.zeta[3]) / (1 - ms.zeta[3]) +
-                pow(ms.d[i] * ms.d[j] / (ms.d[i] + ms.d[j]), 2) * 2 * ms.zeta[2] * ms.zeta[2] / pow(1 - ms.zeta[3], 3);
-            pm.denghs[idx] = ms.zeta[3] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) +
-                (ms.d[i] * ms.d[j] / (ms.d[i] + ms.d[j])) * (3 * ms.zeta[2] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) +
-                6 * ms.zeta[2] * ms.zeta[3] / pow(1 - ms.zeta[3], 3)) +
-                pow(ms.d[i] * ms.d[j] / (ms.d[i] + ms.d[j]), 2) * (4 * ms.zeta[2] * ms.zeta[2] / pow(1 - ms.zeta[3], 3) +
-                6 * ms.zeta[2] * ms.zeta[2] * ms.zeta[3] / pow(1 - ms.zeta[3], 4));
-        }
-    }
-    return pm;
-}
-
-static double calc_ares_hs(const MixState &ms) {
-    return 1 / ms.zeta[0] * (3 * ms.zeta[1] * ms.zeta[2] / (1 - ms.zeta[3]) +
-        pow(ms.zeta[2], 3.) / (ms.zeta[3] * pow(1 - ms.zeta[3], 2)) +
-        (pow(ms.zeta[2], 3.) / pow(ms.zeta[3], 2.) - ms.zeta[0]) * log(1 - ms.zeta[3]));
-}
-
-static double calc_Zhs(const MixState &ms) {
-    return ms.zeta[3] / (1 - ms.zeta[3]) + 3. * ms.zeta[1] * ms.zeta[2] / ms.zeta[0] / (1. - ms.zeta[3]) / (1. - ms.zeta[3]) +
-        (3. * pow(ms.zeta[2], 3.) - ms.zeta[3] * pow(ms.zeta[2], 3.)) / ms.zeta[0] / pow(1. - ms.zeta[3], 3.);
-}
-
-static DispersionCoeffs build_dispersion(const MixState &ms) {
-    static double a0[7] = { 0.9105631445, 0.6361281449, 2.6861347891, -26.547362491, 97.759208784, -159.59154087, 91.297774084 };
-    static double a1[7] = { -0.3084016918, 0.1860531159, -2.5030047259, 21.419793629, -65.255885330, 83.318680481, -33.746922930 };
-    static double a2[7] = { -0.0906148351, 0.4527842806, 0.5962700728, -1.7241829131, -4.1302112531, 13.776631870, -8.6728470368 };
-    static double b0[7] = { 0.7240946941, 2.2382791861, -4.0025849485, -21.003576815, 26.855641363, 206.55133841, -355.60235612 };
-    static double b1[7] = { -0.5755498075, 0.6995095521, 3.8925673390, -17.215471648, 192.67226447, -161.82646165, -165.20769346 };
-    static double b2[7] = { 0.0976883116, -0.2557574982, -9.1558561530, 20.642075974, -38.804430052, 93.626774077, -29.666905585 };
-
-    DispersionCoeffs disp;
-    disp.a.assign(7, 0.0);
-    disp.b.assign(7, 0.0);
-    disp.a1.assign(a1, a1 + 7);
-    disp.a2.assign(a2, a2 + 7);
-    disp.b1.assign(b1, b1 + 7);
-    disp.b2.assign(b2, b2 + 7);
-    for (int i = 0; i < 7; i++) {
-        disp.a[i] = a0[i] + (ms.m_avg - 1.) / ms.m_avg * a1[i] + (ms.m_avg - 1.) / ms.m_avg * (ms.m_avg - 2.) / ms.m_avg * a2[i];
-        disp.b[i] = b0[i] + (ms.m_avg - 1.) / ms.m_avg * b1[i] + (ms.m_avg - 1.) / ms.m_avg * (ms.m_avg - 2.) / ms.m_avg * b2[i];
-    }
-    disp.I1 = 0.0;
-    disp.I2 = 0.0;
-    disp.detI1_det = 0.0;
-    disp.detI2_det = 0.0;
-    for (int i = 0; i < 7; i++) {
-        disp.detI1_det += disp.a[i] * (i + 1) * pow(ms.eta, i);
-        disp.detI2_det += disp.b[i] * (i + 1) * pow(ms.eta, i);
-        disp.I1 += disp.a[i] * pow(ms.eta, i);
-        disp.I2 += disp.b[i] * pow(ms.eta, i);
-    }
-    disp.C1 = 1. / (1. + ms.m_avg * (8 * ms.eta - 2 * ms.eta * ms.eta) / pow(1 - ms.eta, 4) +
-        (1 - ms.m_avg) * (20 * ms.eta - 27 * ms.eta * ms.eta + 12 * pow(ms.eta, 3) - 2 * pow(ms.eta, 4)) /
-        pow((1 - ms.eta) * (2 - ms.eta), 2.0));
-    disp.C2 = -1. * disp.C1 * disp.C1 * (ms.m_avg * (-4 * ms.eta * ms.eta + 20 * ms.eta + 8) / pow(1 - ms.eta, 5) +
-        (1 - ms.m_avg) * (2 * pow(ms.eta, 3) + 12 * ms.eta * ms.eta - 48 * ms.eta + 40) / pow((1 - ms.eta) * (2 - ms.eta), 3.0));
-    return disp;
-}
-
-static AssocState build_assoc_state(double t, double den, const vector<double> &x, const MixState &ms, const PairMix &pm, const add_args &cppargs) {
-    AssocState as;
-    as.num_sites = 0;
-    if (cppargs.e_assoc.empty()) {
-        return as;
-    }
-
-    for (std::vector<int>::const_iterator it = cppargs.assoc_num.begin(); it != cppargs.assoc_num.end(); ++it) {
-        as.num_sites += *it;
-        for (int i = 0; i < *it; i++) {
-            as.iA.push_back(it - cppargs.assoc_num.begin());
-        }
-    }
-
-    as.x_assoc.assign(as.num_sites, 0.0);
-    for (int i = 0; i < as.num_sites; i++) {
-        as.x_assoc[i] = x[as.iA[i]];
-    }
-
-    as.XA.assign(as.num_sites, 0.0);
-    as.delta_ij.assign(as.num_sites * as.num_sites, 0.0);
-    int idxa = 0;
-    for (int i = 0; i < as.num_sites; i++) {
-        int idxi = as.iA[i] * ms.ncomp + as.iA[i];
-        for (int j = 0; j < as.num_sites; j++) {
-            int idxj = as.iA[j] * ms.ncomp + as.iA[j];
-            if (cppargs.assoc_matrix[idxa] != 0) {
-                double eABij = _HUGE;
-                double volABij = sqrt(cppargs.vol_a[as.iA[i]] * cppargs.vol_a[as.iA[j]]) *
-                    pow(sqrt(pm.s_ij[idxi] * pm.s_ij[idxj]) / (0.5 * (pm.s_ij[idxi] + pm.s_ij[idxj])), 3);
-
-                if (cppargs.k_hb.empty()) {
-                    eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2.;
-                } else {
-                    eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2. * (1 - cppargs.k_hb[as.iA[i] * ms.ncomp + as.iA[j]]);
-                }
-                as.delta_ij[idxa] = pm.ghs[as.iA[i] * ms.ncomp + as.iA[j]] * (exp(eABij / t) - 1) *
-                    pow(pm.s_ij[as.iA[i] * ms.ncomp + as.iA[j]], 3) * volABij;
-            }
-            idxa += 1;
-        }
-        as.XA[i] = (-1 + sqrt(1 + 8 * den * as.delta_ij[i * as.num_sites + i])) / (4 * den * as.delta_ij[i * as.num_sites + i]);
-        if (!std::isfinite(as.XA[i])) {
-            as.XA[i] = 0.02;
-        }
-    }
-
-    int ctr = 0;
-    double dif = 1000.;
-    vector<double> XA_old = as.XA;
-    while ((ctr < 100) && (dif > 1e-15)) {
-        ctr += 1;
-        as.XA = XA_find(XA_old, as.delta_ij, den, as.x_assoc);
-        dif = 0.;
-        for (int i = 0; i < as.num_sites; i++) {
-            dif += std::abs(as.XA[i] - XA_old[i]);
-        }
-        for (int i = 0; i < as.num_sites; i++) {
-            XA_old[i] = (as.XA[i] + XA_old[i]) / 2.0;
-        }
-    }
-
-    return as;
-}
-
-static void validate_inf_dilution_inputs(const vector<double> &x, const add_args &cppargs) {
-    int ncomp = x.size();
-    if (ncomp < 1) {
-        throw ValueError("infinite dilution requires at least one component");
-    }
-    if (cppargs.z.empty() || cppargs.z.size() != static_cast<size_t>(ncomp)) {
-        throw ValueError("infinite dilution requires z for every component");
-    }
-    if (std::fabs(cppargs.z[0]) > 1e-12) {
-        throw ValueError("infinite dilution requires the first component to be a neutral solvent (z=0)");
-    }
-    for (int i = 1; i < ncomp; i++) {
-        if (std::fabs(cppargs.z[i]) < 1e-12) {
-            throw ValueError("infinite dilution requires all non-solvent components to have nonzero charge");
-        }
-    }
-}
-
-static double get_dielc_ion(const add_args &cppargs) {
-    if (cppargs.dielc_ion > 0.0) {
-        return cppargs.dielc_ion;
-    }
-    return 8.0;
-}
-
-static double f_mix_value(const vector<double> &x, const add_args &cppargs) {
+double f_mix_value(vector<double> x, add_args &cppargs) {
     if (cppargs.f_solv.empty()) {
         return 1.0;
     }
@@ -498,7 +197,42 @@ static double f_mix_value(const vector<double> &x, const add_args &cppargs) {
     return f_mix;
 }
 
-static double ares_born_legacy(double t, const vector<double> &x, const MixState &ms, double dielc, const add_args &cppargs) {
+double ares_born_ssm_ds(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
+    if (cppargs.z.empty()) {
+        return 0.0;
+    }
+    const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
+    const double factor = (1.0 - 1.0 / dielc);
+    const double f_mix = f_mix_value(x, cppargs);
+
+    double S1 = 0.0;
+    double S2 = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        if (std::fabs(cppargs.z[i]) < 1e-12) {
+            continue;
+        }
+        double d_born = d[i];
+        if (!cppargs.d_born.empty()) {
+            d_born = cppargs.d_born[i];
+        }
+        if (d_born <= 0.0) {
+            continue;
+        }
+        double delta_d = f_mix * std::fabs(cppargs.z[i]) * d_born;
+        double d_eff = d_born + delta_d;
+        if (d_eff <= 0.0) {
+            continue;
+        }
+        const double z2 = cppargs.z[i] * cppargs.z[i];
+        S1 += x[i] * z2 / d_eff;
+        S2 += x[i] * z2 * (1.0 / d_born) * (1.0 / d_eff);
+    }
+
+    // Eq. 7 from Figiel 2025 (SSM + DS)
+    return -C0 / t * factor * S1 + factor * S2;
+}
+
+double ares_born_legacy(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
     if (cppargs.z.empty()) {
         return 0.0;
     }
@@ -509,203 +243,27 @@ static double ares_born_legacy(double t, const vector<double> &x, const MixState
         if (std::fabs(cppargs.z[i]) < 1e-12) {
             continue;
         }
-        double a_i = ms.d[i];
-        if (!cppargs.d_born.empty()) {
-            a_i = cppargs.d_born[i];
-        }
-        if (a_i <= 0.0) {
-            continue;
-        }
-        const double z2 = cppargs.z[i] * cppargs.z[i];
-        S += x[i] * z2 / a_i;
-    }
-    return -C0 / t * factor * S;
-}
-
-static double ares_born_ssm_ds(double t, const vector<double> &x, const MixState &ms, double dielc, const add_args &cppargs) {
-    if (cppargs.z.empty()) {
-        return 0.0;
-    }
-    const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
-    const double factor = (1.0 - 1.0 / dielc);
-    const double dielc_ion = get_dielc_ion(cppargs);
-    const double factor_ion = (1.0 - 1.0 / dielc_ion);
-    const double f_min = f_mix_value(x, cppargs);
-
-    double S1 = 0.0;
-    double S2 = 0.0;
-    for (std::size_t i = 0; i < x.size(); ++i) {
-        if (std::fabs(cppargs.z[i]) < 1e-12) {
-            continue;
-        }
-        double d_born = ms.d[i];
+        double d_born = d[i];
         if (!cppargs.d_born.empty()) {
             d_born = cppargs.d_born[i];
         }
         if (d_born <= 0.0) {
             continue;
         }
-        double delta_d = (f_min - 1.0) / std::fabs(cppargs.z[i]) * d_born;
-        double d_eff = d_born + delta_d;
-        if (d_eff <= 0.0) {
-            continue;
-        }
         const double z2 = cppargs.z[i] * cppargs.z[i];
-        S1 += x[i] * z2 / d_eff;
-        S2 += x[i] * z2 * (1.0 / d_born - 1.0 / d_eff);
+        S += x[i] * z2 / d_born;
     }
-
-    return -C0 / t * (factor * S1 + factor_ion * S2);
+    return -C0 / t * factor * S;
 }
 
-static double ares_born_model(double t, const vector<double> &x, const MixState &ms, double dielc, const add_args &cppargs) {
-    if (!cppargs.born_enabled) {
-        return 0.0;
-    }
+double ares_born_model(double t, vector<double> x, add_args &cppargs, vector<double> d, double dielc) {
     if (cppargs.born_model == 0) {
-        return ares_born_legacy(t, x, ms, dielc, cppargs);
+        return ares_born_legacy(t, x, cppargs, d, dielc);
     }
-    return ares_born_ssm_ds(t, x, ms, dielc, cppargs);
+    return ares_born_ssm_ds(t, x, cppargs, d, dielc);
 }
 
-static void find_cation_anion(const vector<double> &x, const add_args &cppargs, int &ic, int &ia, double &x_c, double &x_a) {
-    ic = -1;
-    ia = -1;
-    x_c = 0.0;
-    x_a = 0.0;
-    for (int i = 0; i < static_cast<int>(x.size()); i++) {
-        if (cppargs.z[i] > 0) {
-            x_c += x[i];
-            if (ic < 0) {
-                ic = i;
-            }
-        } else if (cppargs.z[i] < 0) {
-            x_a += x[i];
-            if (ia < 0) {
-                ia = i;
-            }
-        }
-    }
-}
 
-static double compute_K_ip(double t, double den, double eps_r, double zc, double za, double a, double l_B) {
-    if (l_B <= a) {
-        return 0.0;
-    }
-    const double C = std::fabs(zc * za) * E_CHRG * E_CHRG / (4.0 * PI * perm_vac * eps_r * kb * t);
-    const int N = 400;
-    const double dr = (l_B - a) / N;
-    double integral = 0.0;
-    for (int i = 0; i < N; i++) {
-        double r = a + (i + 0.5) * dr;
-        integral += std::exp(C / r) * r * r;
-    }
-    integral *= dr;
-    return 4.0 * PI * den * integral;
-}
-
-static double solve_alpha(double x_pm, double K_ip) {
-    if (x_pm <= 0.0 || K_ip <= 0.0) {
-        return 1.0;
-    }
-    double disc = 1.0 + 4.0 * x_pm * K_ip;
-    if (!std::isfinite(disc) || disc < 0.0) {
-        return 0.0;
-    }
-    double sqrt_disc = std::sqrt(disc);
-    double alpha = 2.0 / (1.0 + sqrt_disc);
-    if (!std::isfinite(alpha)) {
-        alpha = 0.0;
-    }
-    if (alpha < 0.0) {
-        alpha = 0.0;
-    }
-    if (alpha > 1.0) {
-        alpha = 1.0;
-    }
-    return alpha;
-}
-
-struct IonDH {
-    double kappa;
-    vector<double> chi;
-    vector<double> sigma_k;
-    vector<double> alpha;
-    vector<double> a_eff;
-};
-
-static IonDH build_ion_dh(double t, const MixState &ms, const vector<double> &x, const add_args &cppargs, double dielc) {
-    IonDH dh;
-    dh.kappa = 0.0;
-    dh.chi.assign(ms.ncomp, 0.0);
-    dh.sigma_k.assign(ms.ncomp, 0.0);
-    dh.alpha.assign(ms.ncomp, 1.0);
-    dh.a_eff.assign(ms.ncomp, 0.0);
-
-    if (cppargs.z.empty()) {
-        return dh;
-    }
-
-    double alpha = 1.0;
-    double l_B = 0.0;
-    if (cppargs.bjerrum_model) {
-        int ic, ia;
-        double x_c, x_a;
-        find_cation_anion(x, cppargs, ic, ia, x_c, x_a);
-        if (ic >= 0 && ia >= 0 && x_c > 0.0 && x_a > 0.0) {
-            double zc = cppargs.z[ic];
-            double za = cppargs.z[ia];
-            double nu_c = std::fabs(za);
-            double nu_a = std::fabs(zc);
-            double x_pm = std::pow(std::pow(x_c, nu_c) * std::pow(x_a, nu_a), 1.0 / (nu_c + nu_a));
-            l_B = std::fabs(zc * za) * E_CHRG * E_CHRG / (8.0 * PI * perm_vac * dielc * kb * t);
-            double a = 0.5 * (cppargs.s[ic] + cppargs.s[ia]);
-            double K_ip = compute_K_ip(t, ms.den, dielc, zc, za, a, l_B);
-            alpha = solve_alpha(x_pm, K_ip);
-        }
-    }
-
-    for (int i = 0; i < ms.ncomp; i++) {
-        if (cppargs.z[i] != 0) {
-            dh.alpha[i] = alpha;
-        }
-    }
-
-    double sum_z2 = 0.0;
-    for (int i = 0; i < ms.ncomp; i++) {
-        sum_z2 += dh.alpha[i] * x[i] * cppargs.z[i] * cppargs.z[i];
-    }
-    if (sum_z2 <= 0.0) {
-        return dh;
-    }
-
-    dh.kappa = std::sqrt(ms.den * E_CHRG * E_CHRG / (kb * t * perm_vac) * sum_z2 / dielc);
-    if (dh.kappa == 0.0) {
-        return dh;
-    }
-
-    for (int i = 0; i < ms.ncomp; i++) {
-        double a_i = cppargs.s[i];
-        if (cppargs.bjerrum_model && l_B > 0.0) {
-            a_i = std::max(a_i, l_B);
-        }
-        dh.a_eff[i] = a_i;
-        double kappaa = dh.kappa * a_i;
-        if (kappaa == 0.0) {
-            continue;
-        }
-        if (kappaa < 1e-6) {
-            // Series expansion to avoid catastrophic cancellation for small kappaa
-            double y = kappaa;
-            dh.chi[i] = 1.0 - 0.75 * y + 0.6 * y * y;
-            dh.sigma_k[i] = 1.0 - 1.5 * y + 1.8 * y * y;
-            continue;
-        }
-        dh.chi[i] = 3.0 / pow(kappaa, 3) * (1.5 + log(1 + kappaa) - 2 * (1 + kappaa) + 0.5 * pow(1 + kappaa, 2));
-        dh.sigma_k[i] = -2.0 * dh.chi[i] + 3.0 / (1.0 + kappaa);
-    }
-    return dh;
-}
 
 vector<double> XA_find(vector<double> XA_guess, vector<double> delta_ij, double den,
     vector<double> x) {
@@ -800,20 +358,118 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
     /**
     Calculate the compressibility factor.
     */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    double Zhs = calc_Zhs(ms);
+    int ncomp = x.size(); // number of components
+    vector<double> d (ncomp);
+    for (int i = 0; i < ncomp; i++) {
+        d[i] = cppargs.s[i]*(1-0.12*exp(-3*cppargs.e[i]/t));
+    }
+    if (!cppargs.z.empty()) {
+        for (int i = 0; i < ncomp; i++) {
+            if (cppargs.z[i] != 0) {
+                d[i] = cppargs.s[i]*(1-0.12); // for ions the diameter is assumed to be temperature independent (see Held et al. 2014)
+            }
+        }
+    }
 
-    double summ = 0.0;
-    for (int i = 0; i < ms.ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) / pm.ghs[i * ms.ncomp + i] * pm.denghs[i * ms.ncomp + i];
+    double den = rho*N_AV/1.0e30;
+
+    vector<double> zeta (4, 0);
+    double summ;
+    for (int i = 0; i < 4; i++) {
+        summ = 0;
+        for (int j = 0; j < ncomp; j++) {
+            summ += x[j]*cppargs.m[j]*pow(d[j], i);
+        }
+        zeta[i] = PI/6*den*summ;
+    }
+
+    double eta = zeta[3];
+    double m_avg = 0;
+    for (int i = 0; i < ncomp; i++) {
+        m_avg += x[i]*cppargs.m[i];
+    }
+
+    vector<double> ghs (ncomp*ncomp, 0);
+    vector<double> denghs (ncomp*ncomp, 0);
+    vector<double> e_ij (ncomp*ncomp, 0);
+    vector<double> s_ij (ncomp*ncomp, 0);
+    double m2es3 = 0.;
+    double m2e2s3 = 0.;
+    int idx = -1;
+    for (int i = 0; i < ncomp; i++) {
+        for (int j = 0; j < ncomp; j++) {
+            idx += 1;
+            if (cppargs.l_ij.empty()) {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.;
+            }
+            else {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.*(1-cppargs.l_ij[idx]);
+            }
+            if (!cppargs.z.empty()) {
+                if (cppargs.z[i]*cppargs.z[j] <= 0) { // for two cations or two anions e_ij is kept at zero to avoid dispersion between like ions (see Held et al. 2014)
+                    if (cppargs.k_ij.empty()) {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                    }
+                    else {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                    }
+                }
+            } else {
+                if (cppargs.k_ij.empty()) {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                }
+                else {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                }
+            }
+            m2es3 = m2es3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*e_ij[idx]/t*pow(s_ij[idx], 3);
+            m2e2s3 = m2e2s3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*pow(e_ij[idx]/t,2)*pow(s_ij[idx], 3);
+            ghs[idx] = 1/(1-zeta[3]) + (d[i]*d[j]/(d[i]+d[j]))*3*zeta[2]/(1-zeta[3])/(1-zeta[3]) +
+                    pow(d[i]*d[j]/(d[i]+d[j]), 2)*2*zeta[2]*zeta[2]/pow(1-zeta[3], 3);
+            denghs[idx] = zeta[3]/(1-zeta[3])/(1-zeta[3]) +
+                (d[i]*d[j]/(d[i]+d[j]))*(3*zeta[2]/(1-zeta[3])/(1-zeta[3]) +
+                6*zeta[2]*zeta[3]/pow(1-zeta[3], 3)) +
+                pow(d[i]*d[j]/(d[i]+d[j]), 2)*(4*zeta[2]*zeta[2]/pow(1-zeta[3], 3) +
+                6*zeta[2]*zeta[2]*zeta[3]/pow(1-zeta[3], 4));
+        }
+    }
+
+    double Zhs = zeta[3]/(1-zeta[3]) + 3.*zeta[1]*zeta[2]/zeta[0]/(1.-zeta[3])/(1.-zeta[3]) +
+        (3.*pow(zeta[2], 3.) - zeta[3]*pow(zeta[2], 3.))/zeta[0]/pow(1.-zeta[3], 3.);
+
+    static double a0[7] = { 0.9105631445, 0.6361281449, 2.6861347891, -26.547362491, 97.759208784, -159.59154087, 91.297774084 };
+    static double a1[7] = { -0.3084016918, 0.1860531159, -2.5030047259, 21.419793629, -65.255885330, 83.318680481, -33.746922930 };
+    static double a2[7] = { -0.0906148351, 0.4527842806, 0.5962700728, -1.7241829131, -4.1302112531, 13.776631870, -8.6728470368 };
+    static double b0[7] = { 0.7240946941, 2.2382791861, -4.0025849485, -21.003576815, 26.855641363, 206.55133841, -355.60235612 };
+    static double b1[7] = { -0.5755498075, 0.6995095521, 3.8925673390, -17.215471648, 192.67226447, -161.82646165, -165.20769346 };
+    static double b2[7] = { 0.0976883116, -0.2557574982, -9.1558561530, 20.642075974, -38.804430052, 93.626774077, -29.666905585 };
+
+    vector<double> a (7, 0);
+    vector<double> b (7, 0);
+    for (int i = 0; i < 7; i++) {
+        a[i] = a0[i] + (m_avg-1.)/m_avg*a1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*a2[i];
+        b[i] = b0[i] + (m_avg-1.)/m_avg*b1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*b2[i];
+    }
+
+    double detI1_det = 0.0;
+    double detI2_det = 0.0;
+    double I2 = 0.0;
+    for (int i = 0; i < 7; i++) {
+        detI1_det += a[i]*(i+1)*pow(eta, i);
+        detI2_det += b[i]*(i+1)*pow(eta, i);
+        I2 += b[i]*pow(eta, i);
+    }
+    double C1 = 1./(1. + m_avg*(8*eta-2*eta*eta)/pow(1-eta, 4) + (1-m_avg)*(20*eta-27*eta*eta+12*pow(eta, 3)-2*pow(eta, 4))/pow((1-eta)*(2-eta), 2.0));
+    double C2 = -1.*C1*C1*(m_avg*(-4*eta*eta+20*eta+8)/pow(1-eta, 5) + (1-m_avg)*(2*pow(eta, 3)+12*eta*eta-48*eta+40)/pow((1-eta)*(2-eta), 3.0));
+
+    summ = 0.0;
+    for (int i = 0; i < ncomp; i++) {
+        summ += x[i]*(cppargs.m[i]-1)/ghs[i*ncomp+i]*denghs[i*ncomp+i];
     }
 
     double Zid = 1.0;
-    double Zhc = ms.m_avg * Zhs - summ;
-    double Zdisp = -2 * PI * ms.den * disp.detI1_det * pm.m2es3 -
-        PI * ms.den * ms.m_avg * (disp.C1 * disp.detI2_det + disp.C2 * ms.eta * disp.I2) * pm.m2e2s3;
+    double Zhc = m_avg*Zhs - summ;
+    double Zdisp = -2*PI*den*detI1_det*m2es3 - PI*den*m_avg*(C1*detI2_det + C2*eta*I2)*m2e2s3;
 
     // Dipole term (Gross and Vrabec term) --------------------------------------
     double Zpolar = 0;
@@ -825,7 +481,7 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
         vector<double> adip (5, 0);
         vector<double> bdip (5, 0);
         vector<double> cdip (5, 0);
-        vector<double> dipmSQ (ms.ncomp, 0);
+        vector<double> dipmSQ (ncomp, 0);
         double J2, detJ2_det, J3, detJ3_det;
 
         static double a0dip[5] = { 0.3043504, -0.1358588, 1.4493329, 0.3556977, -2.0653308 };
@@ -840,13 +496,13 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
 
         const static double conv = 7242.702976750923; // conversion factor, see the note below Table 2 in Gross and Vrabec 2006
 
-        for (int i = 0; i < ms.ncomp; i++) {
+        for (int i = 0; i < ncomp; i++) {
             dipmSQ[i] = pow(cppargs.dipm[i], 2.)/(cppargs.m[i]*cppargs.e[i]*pow(cppargs.s[i],3.))*conv;
         }
 
         double m_ij;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < ms.ncomp; j++) {
+        for (int i = 0; i < ncomp; i++) {
+            for (int j = 0; j < ncomp; j++) {
                 m_ij = sqrt(cppargs.m[i]*cppargs.m[j]);
                 if (m_ij > 2) {
                     m_ij = 2;
@@ -856,20 +512,20 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
                 for (int l = 0; l < 5; l++) {
                     adip[l] = a0dip[l] + (m_ij-1)/m_ij*a1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*a2dip[l];
                     bdip[l] = b0dip[l] + (m_ij-1)/m_ij*b1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*b2dip[l];
-                    J2 += (adip[l] + bdip[l]*pm.e_ij[i*ms.ncomp+j]/t)*pow(ms.eta, l);
-                    detJ2_det += (adip[l] + bdip[l]*pm.e_ij[i*ms.ncomp+j]/t)*(l+1)*pow(ms.eta, l);
+                    J2 += (adip[l] + bdip[l]*e_ij[i*ncomp+j]/t)*pow(eta, l); // i*ncomp+j needs to be used for e_ij because it is formatted as a 1D vector
+                    detJ2_det += (adip[l] + bdip[l]*e_ij[i*ncomp+j]/t)*(l+1)*pow(eta, l);
                 }
-                A2 += x[i]*x[j]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)/
-                    pow(pm.s_ij[i*ms.ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*J2;
-                dA2_det += x[i]*x[j]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pow(pm.s_ij[i*ms.ncomp+i],3)*
-                    pow(pm.s_ij[j*ms.ncomp+j],3)/pow(pm.s_ij[i*ms.ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*detJ2_det;
+                A2 += x[i]*x[j]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)/
+                    pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*J2;
+                dA2_det += x[i]*x[j]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*
+                    pow(s_ij[j*ncomp+j],3)/pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*detJ2_det;
             }
         }
 
         double m_ijk;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < ms.ncomp; j++) {
-                for (int k = 0; k < ms.ncomp; k++) {
+        for (int i = 0; i < ncomp; i++) {
+            for (int j = 0; j < ncomp; j++) {
+                for (int k = 0; k < ncomp; k++) {
                     m_ijk = pow((cppargs.m[i]*cppargs.m[j]*cppargs.m[k]),1/3.);
                     if (m_ijk > 2) {
                         m_ijk = 2;
@@ -878,78 +534,135 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
                     detJ3_det = 0.;
                     for (int l = 0; l < 5; l++) {
                         cdip[l] = c0dip[l] + (m_ijk-1)/m_ijk*c1dip[l] + (m_ijk-1)/m_ijk*(m_ijk-2)/m_ijk*c2dip[l];
-                    J3 += cdip[l]*pow(ms.eta, l);
-                    detJ3_det += cdip[l]*(l+2)*pow(ms.eta, (l+1));
+                        J3 += cdip[l]*pow(eta, l);
+                        detJ3_det += cdip[l]*(l+2)*pow(eta, (l+1));
+                    }
+                    A3 += x[i]*x[j]*x[k]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*
+                        pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/
+                        s_ij[j*ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
+                        dipmSQ[j]*dipmSQ[k]*J3;
+                    dA3_det += x[i]*x[j]*x[k]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*
+                        pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/
+                        s_ij[j*ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
+                        dipmSQ[j]*dipmSQ[k]*detJ3_det;
                 }
-                A3 += x[i]*x[j]*x[k]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pm.e_ij[k*ms.ncomp+k]/t*
-                    pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)*pow(pm.s_ij[k*ms.ncomp+k],3)/pm.s_ij[i*ms.ncomp+j]/pm.s_ij[i*ms.ncomp+k]/
-                    pm.s_ij[j*ms.ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                    dipmSQ[j]*dipmSQ[k]*J3;
-                dA3_det += x[i]*x[j]*x[k]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pm.e_ij[k*ms.ncomp+k]/t*
-                    pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)*pow(pm.s_ij[k*ms.ncomp+k],3)/pm.s_ij[i*ms.ncomp+j]/pm.s_ij[i*ms.ncomp+k]/
-                    pm.s_ij[j*ms.ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                    dipmSQ[j]*dipmSQ[k]*detJ3_det;
             }
         }
-        }
 
-        A2 = -PI * ms.den * A2;
-        A3 = -4 / 3. * PI * PI * ms.den * ms.den * A3;
-        dA2_det = -PI * ms.den / ms.eta * dA2_det;
-        dA3_det = -4 / 3. * PI * PI * ms.den / ms.eta * ms.den / ms.eta * dA3_det;
+        A2 = -PI*den*A2;
+        A3 = -4/3.*PI*PI*den*den*A3;
+        dA2_det = -PI*den/eta*dA2_det;
+        dA3_det = -4/3.*PI*PI*den/eta*den/eta*dA3_det;
 
         if (A2 != 0) { // when the mole fraction of the polar compounds is 0 then A2 = 0 and division by 0 occurs
-            Zpolar = ms.eta * ((dA2_det * (1 - A3 / A2) + (dA3_det * A2 - A3 * dA2_det) / A2) / (1 - A3 / A2) / (1 - A3 / A2));
+            Zpolar = eta*((dA2_det*(1-A3/A2)+(dA3_det*A2-A3*dA2_det)/A2)/(1-A3/A2)/(1-A3/A2));
         }
     }
 
     // Association term -------------------------------------------------------
     double Zassoc = 0;
     if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, ms.den, x, ms, pm, cppargs);
-        vector<double> ddelta_dx(as.num_sites * as.num_sites * ms.ncomp, 0);
+        int num_sites = 0;
+        vector<int> iA; //indices of associating compounds
+        for(std::vector<int>::iterator it = cppargs.assoc_num.begin(); it != cppargs.assoc_num.end(); ++it) {
+            num_sites += *it;
+            for (int i = 0; i < *it; i++) {
+                iA.push_back(it - cppargs.assoc_num.begin());
+            }
+        }
+
+        vector<double> x_assoc(num_sites); // mole fractions of only the associating compounds
+        for (int i = 0; i < num_sites; i++) {
+            x_assoc[i] = x[iA[i]];
+        }
+
+        vector<double> XA (num_sites, 0);
+        vector<double> delta_ij(num_sites * num_sites, 0);
+        int idxa = 0;
+        int idxi = 0; // index for the ii-th compound
+        int idxj = 0; // index for the jj-th compound
+        for (int i = 0; i < num_sites; i++) {
+            idxi = iA[i]*ncomp+iA[i];
+            for (int j = 0; j < num_sites; j++) {
+                idxj = iA[j]*ncomp+iA[j];
+                if (cppargs.assoc_matrix[idxa] != 0) {
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
+                    }
+                    else {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                    }
+                    delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
+                }
+                idxa += 1;
+            }
+            XA[i] = (-1 + sqrt(1+8*den*delta_ij[i*num_sites+i]))/(4*den*delta_ij[i*num_sites+i]);
+            if (!std::isfinite(XA[i])) {
+                XA[i] = 0.02;
+            }
+        }
+
+        vector<double> ddelta_dx(num_sites * num_sites * ncomp, 0);
         int idx_ddelta = 0;
-        for (int k = 0; k < ms.ncomp; k++) {
-            int idxi = 0;
-            int idxj = 0;
-            int idxa = 0;
-            for (int i = 0; i < as.num_sites; i++) {
-                idxi = as.iA[i] * ms.ncomp + as.iA[i];
-                for (int j = 0; j < as.num_sites; j++) {
-                    idxj = as.iA[j] * ms.ncomp + as.iA[j];
+        for (int k = 0; k < ncomp; k++) {
+            int idxi = 0; // index for the ii-th compound
+            int idxj = 0; // index for the jj-th compound
+            idxa = 0;
+            for (int i = 0; i < num_sites; i++) {
+                idxi = iA[i]*ncomp+iA[i];
+                for (int j = 0; j < num_sites; j++) {
+                    idxj = iA[j]*ncomp+iA[j];
                     if (cppargs.assoc_matrix[idxa] != 0) {
                         double eABij = _HUGE;
-                        double volABij = sqrt(cppargs.vol_a[as.iA[i]] * cppargs.vol_a[as.iA[j]]) *
-                            pow(sqrt(pm.s_ij[idxi] * pm.s_ij[idxj]) / (0.5 * (pm.s_ij[idxi] + pm.s_ij[idxj])), 3);
+                        double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                                s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
 
                         if (cppargs.k_hb.empty()) {
-                            eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2.;
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
                         }
                         else {
-                            eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2. * (1 - cppargs.k_hb[as.iA[i] * ms.ncomp + as.iA[j]]);
+                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
                         }
-                        double dghsd_dx = PI / 6. * cppargs.m[k] * (pow(ms.d[k], 3) / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) +
-                            3 * ms.d[as.iA[i]] * ms.d[as.iA[j]] / (ms.d[as.iA[i]] + ms.d[as.iA[j]]) *
-                            (ms.d[k] * ms.d[k] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 2 * pow(ms.d[k], 3) *
-                            ms.zeta[2] / pow(1 - ms.zeta[3], 3)) + 2 * pow((ms.d[as.iA[i]] * ms.d[as.iA[j]] /
-                            (ms.d[as.iA[i]] + ms.d[as.iA[j]])), 2) * (2 * ms.d[k] * ms.d[k] * ms.zeta[2] / pow(1 - ms.zeta[3], 3) +
-                            3 * (pow(ms.d[k], 3) * ms.zeta[2] * ms.zeta[2] / pow(1 - ms.zeta[3], 4))));
-                        ddelta_dx[idx_ddelta] = dghsd_dx * (exp(eABij / t) - 1) *
-                            pow(pm.s_ij[as.iA[i] * ms.ncomp + as.iA[j]], 3) * volABij;
+                        double dghsd_dx = PI/6.*cppargs.m[k]*(pow(d[k], 3)/(1-zeta[3])/(1-zeta[3]) + 3*d[iA[i]]*d[iA[j]]/
+                            (d[iA[i]]+d[iA[j]])*(d[k]*d[k]/(1-zeta[3])/(1-zeta[3])+2*pow(d[k], 3)*
+                            zeta[2]/pow(1-zeta[3], 3)) + 2*pow((d[iA[i]]*d[iA[j]]/(d[iA[i]]+d[iA[j]])), 2)*
+                            (2*d[k]*d[k]*zeta[2]/pow(1-zeta[3], 3)+3*(pow(d[k], 3)*zeta[2]*zeta[2]
+                            /pow(1-zeta[3], 4))));
+                        ddelta_dx[idx_ddelta] = dghsd_dx*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
                     }
                     idx_ddelta += 1;
                     idxa += 1;
                 }
             }
         }
-        vector<double> dXA_dx(as.num_sites * ms.ncomp, 0);
-        dXA_dx = dXAdx_find(cppargs.assoc_num, as.delta_ij, ms.den, as.XA, ddelta_dx, as.x_assoc);
+
+        int ctr = 0;
+        double dif = 1000.;
+        vector<double> XA_old = XA;
+        while ((ctr < 100) && (dif > 1e-15)) {
+            ctr += 1;
+            XA = XA_find(XA_old, delta_ij, den, x_assoc);
+            dif = 0.;
+            for (int i = 0; i < num_sites; i++) {
+                dif += std::abs(XA[i] - XA_old[i]);
+            }
+            for (int i = 0; i < num_sites; i++) {
+                XA_old[i] = (XA[i] + XA_old[i]) / 2.0;
+            }
+        }
+
+        vector<double> dXA_dx(num_sites*ncomp, 0);
+        dXA_dx = dXAdx_find(cppargs.assoc_num, delta_ij, den, XA, ddelta_dx, x_assoc);
 
         summ = 0.;
         int ij = 0;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < as.num_sites; j++) {
-                summ += x[i] * ms.den * x[as.iA[j]] * (1 / as.XA[j] - 0.5) * dXA_dx[ij];
+        for (int i = 0; i < ncomp; i++) {
+            for (int j = 0; j < num_sites; j++) {
+                summ += x[i]*den*x[iA[j]]*(1/XA[j]-0.5)*dXA_dx[ij];
                 ij += 1;
             }
         }
@@ -962,240 +675,36 @@ double pcsaft_Z_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
     double Zion = 0;
     if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
-            double summ_sigma = 0.0;
-            for (int i = 0; i < ms.ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ_sigma += dh.alpha[i] * x[i] * q * q * dh.sigma_k[i];
+        vector<double> q(cppargs.z.begin(), cppargs.z.end());
+        for (int i = 0; i < ncomp; i++) {
+            q[i] = q[i] * E_CHRG;
+        }
+
+        summ = 0.0;
+        for (int i = 0; i < ncomp; i++) {
+            summ += cppargs.z[i] * cppargs.z[i] * x[i];
+        }
+
+        double kappa = sqrt(den * E_CHRG * E_CHRG / kb / t / (dielc * perm_vac) * summ);
+
+        if (kappa != 0) {
+            double chi, sigma_k;
+            summ = 0.0;
+            for (int i = 0; i < ncomp; i++) {
+                chi = 3 / pow(kappa * d[i], 3) * (1.5 + log(1 + kappa * d[i]) - 2 * (1 + kappa * d[i]) +
+                    0.5 * pow(1 + kappa * d[i], 2));
+                sigma_k = -2 * chi + 3 / (1 + kappa * d[i]);
+                summ += q[i] * q[i] * x[i] * sigma_k;
             }
-            Zion = -dh.kappa / 24. / PI / kb / t / (dielc * perm_vac) * summ_sigma;
+            Zion = -1 * kappa / 24. / PI / kb / t / (dielc * perm_vac) * summ;
         }
     }
 
     // Born term ---------------------------------------------------------------
-    double Z = Zid + Zhc + Zdisp + Zpolar + Zassoc + Zion;
+    double Zborn = 0;
+
+    double Z = Zid + Zhc + Zdisp + Zpolar + Zassoc + Zion + Zborn;
     return Z;
-}
-
-vector<double> pcsaft_Z_contrib_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
-    /**
-    Calculate compressibility factor contributions.
-    Returns: [Z, Zid, Zhc, Zdisp, Zpolar, Zassoc, Zion]
-    */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    double Zhs = calc_Zhs(ms);
-
-    double summ = 0.0;
-    for (int i = 0; i < ms.ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) / pm.ghs[i * ms.ncomp + i] * pm.denghs[i * ms.ncomp + i];
-    }
-
-    double Zid = 1.0;
-    double Zhc = ms.m_avg * Zhs - summ;
-    double Zdisp = -2 * PI * ms.den * disp.detI1_det * pm.m2es3 -
-        PI * ms.den * ms.m_avg * (disp.C1 * disp.detI2_det + disp.C2 * ms.eta * disp.I2) * pm.m2e2s3;
-
-    // Dipole term (Gross and Vrabec term) --------------------------------------
-    double Zpolar = 0.0;
-    if (!cppargs.dipm.empty()) {
-        double A2 = 0.;
-        double A3 = 0.;
-        double dA2_det = 0.;
-        double dA3_det = 0.;
-        vector<double> adip (5, 0);
-        vector<double> bdip (5, 0);
-        vector<double> cdip (5, 0);
-        vector<double> dipmSQ (ms.ncomp, 0);
-        double J2, detJ2_det, J3, detJ3_det;
-
-        static double a0dip[5] = { 0.3043504, -0.1358588, 1.4493329, 0.3556977, -2.0653308 };
-        static double a1dip[5] = { 0.9534641, -1.8396383, 2.0131180, -7.3724958, 8.2374135 };
-        static double a2dip[5] = { -1.1610080, 4.5258607, 0.9751222, -12.281038, 5.9397575 };
-        static double b0dip[5] = { 0.2187939, -1.1896431, 1.1626889, 0, 0 };
-        static double b1dip[5] = { -0.5873164, 1.2489132, -0.5085280, 0, 0 };
-        static double b2dip[5] = { 3.4869576, -14.915974, 15.372022, 0, 0 };
-        static double c0dip[5] = { -0.0646774, 0.1975882, -0.8087562, 0.6902849, 0 };
-        static double c1dip[5] = { -0.9520876, 2.9924258, -2.3802636, -0.2701261, 0 };
-        static double c2dip[5] = { -0.6260979, 1.2924686, 1.6542783, -3.4396744, 0 };
-
-        const static double conv = 7242.702976750923;
-
-        for (int i = 0; i < ms.ncomp; i++) {
-            dipmSQ[i] = pow(cppargs.dipm[i], 2.)/(cppargs.m[i]*cppargs.e[i]*pow(cppargs.s[i],3.))*conv;
-        }
-
-        double m_ij;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < ms.ncomp; j++) {
-                m_ij = sqrt(cppargs.m[i]*cppargs.m[j]);
-                if (m_ij > 2) {
-                    m_ij = 2;
-                }
-                J2 = 0.;
-                detJ2_det = 0.;
-                for (int l = 0; l < 5; l++) {
-                    adip[l] = a0dip[l] + (m_ij-1)/m_ij*a1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*a2dip[l];
-                    bdip[l] = b0dip[l] + (m_ij-1)/m_ij*b1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*b2dip[l];
-                    J2 += (adip[l] + bdip[l]*pm.e_ij[i*ms.ncomp+j]/t)*pow(ms.eta, l);
-                    detJ2_det += (adip[l] + bdip[l]*pm.e_ij[i*ms.ncomp+j]/t)*(l+1)*pow(ms.eta, l);
-                }
-                A2 += x[i]*x[j]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)/
-                    pow(pm.s_ij[i*ms.ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*J2;
-                dA2_det += x[i]*x[j]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pow(pm.s_ij[i*ms.ncomp+i],3)*
-                    pow(pm.s_ij[j*ms.ncomp+j],3)/pow(pm.s_ij[i*ms.ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*detJ2_det;
-            }
-        }
-
-        double m_ijk;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < ms.ncomp; j++) {
-                for (int k = 0; k < ms.ncomp; k++) {
-                    m_ijk = pow((cppargs.m[i]*cppargs.m[j]*cppargs.m[k]),1/3.);
-                    if (m_ijk > 2) {
-                        m_ijk = 2;
-                    }
-                    J3 = 0.;
-                    detJ3_det = 0.;
-                    for (int l = 0; l < 5; l++) {
-                        cdip[l] = c0dip[l] + (m_ijk-1)/m_ijk*c1dip[l] + (m_ijk-1)/m_ijk*(m_ijk-2)/m_ijk*c2dip[l];
-                        J3 += cdip[l]*pow(ms.eta, l);
-                        detJ3_det += cdip[l]*(l+2)*pow(ms.eta, (l+1));
-                    }
-                    A3 += x[i]*x[j]*x[k]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pm.e_ij[k*ms.ncomp+k]/t*
-                        pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)*pow(pm.s_ij[k*ms.ncomp+k],3)/pm.s_ij[i*ms.ncomp+j]/pm.s_ij[i*ms.ncomp+k]/
-                        pm.s_ij[j*ms.ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                        dipmSQ[j]*dipmSQ[k]*J3;
-                    dA3_det += x[i]*x[j]*x[k]*pm.e_ij[i*ms.ncomp+i]/t*pm.e_ij[j*ms.ncomp+j]/t*pm.e_ij[k*ms.ncomp+k]/t*
-                        pow(pm.s_ij[i*ms.ncomp+i],3)*pow(pm.s_ij[j*ms.ncomp+j],3)*pow(pm.s_ij[k*ms.ncomp+k],3)/pm.s_ij[i*ms.ncomp+j]/pm.s_ij[i*ms.ncomp+k]/
-                        pm.s_ij[j*ms.ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                        dipmSQ[j]*dipmSQ[k]*detJ3_det;
-                }
-            }
-        }
-
-        A2 = -PI * ms.den * A2;
-        A3 = -4 / 3. * PI * PI * ms.den * ms.den * A3;
-        dA2_det = -PI * ms.den / ms.eta * dA2_det;
-        dA3_det = -4 / 3. * PI * PI * ms.den / ms.eta * ms.den / ms.eta * dA3_det;
-
-        if (A2 != 0) {
-            Zpolar = ms.eta * ((dA2_det * (1 - A3 / A2) + (dA3_det * A2 - A3 * dA2_det) / A2) / (1 - A3 / A2) / (1 - A3 / A2));
-        }
-    }
-
-    // Association term -------------------------------------------------------
-    double Zassoc = 0.0;
-    if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, ms.den, x, ms, pm, cppargs);
-        vector<double> ddelta_dx(as.num_sites * as.num_sites * ms.ncomp, 0);
-        int idx_ddelta = 0;
-        for (int k = 0; k < ms.ncomp; k++) {
-            int idxi = 0;
-            int idxj = 0;
-            int idxa = 0;
-            for (int i = 0; i < as.num_sites; i++) {
-                idxi = as.iA[i] * ms.ncomp + as.iA[i];
-                for (int j = 0; j < as.num_sites; j++) {
-                    idxj = as.iA[j] * ms.ncomp + as.iA[j];
-                    if (cppargs.assoc_matrix[idxa] != 0) {
-                        double eABij = _HUGE;
-                        double volABij = sqrt(cppargs.vol_a[as.iA[i]] * cppargs.vol_a[as.iA[j]]) *
-                            pow(sqrt(pm.s_ij[idxi] * pm.s_ij[idxj]) / (0.5 * (pm.s_ij[idxi] + pm.s_ij[idxj])), 3);
-
-                        if (cppargs.k_hb.empty()) {
-                            eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2.;
-                        }
-                        else {
-                            eABij = (cppargs.e_assoc[as.iA[i]] + cppargs.e_assoc[as.iA[j]]) / 2. * (1 - cppargs.k_hb[as.iA[i] * ms.ncomp + as.iA[j]]);
-                        }
-                        double dghsd_dx = PI / 6. * cppargs.m[k] * (pow(ms.d[k], 3) / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) +
-                            3 * ms.d[as.iA[i]] * ms.d[as.iA[j]] / (ms.d[as.iA[i]] + ms.d[as.iA[j]]) *
-                            (ms.d[k] * ms.d[k] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 2 * pow(ms.d[k], 3) *
-                            ms.zeta[2] / pow(1 - ms.zeta[3], 3)) + 2 * pow((ms.d[as.iA[i]] * ms.d[as.iA[j]] /
-                            (ms.d[as.iA[i]] + ms.d[as.iA[j]])), 2) * (2 * ms.d[k] * ms.d[k] * ms.zeta[2] / pow(1 - ms.zeta[3], 3) +
-                            3 * (pow(ms.d[k], 3) * ms.zeta[2] * ms.zeta[2] / pow(1 - ms.zeta[3], 4))));
-                        ddelta_dx[idx_ddelta] = dghsd_dx * (exp(eABij / t) - 1) *
-                            pow(pm.s_ij[as.iA[i] * ms.ncomp + as.iA[j]], 3) * volABij;
-                    }
-                    idx_ddelta += 1;
-                    idxa += 1;
-                }
-            }
-        }
-        vector<double> dXA_dx(as.num_sites * ms.ncomp, 0);
-        dXA_dx = dXAdx_find(cppargs.assoc_num, as.delta_ij, ms.den, as.XA, ddelta_dx, as.x_assoc);
-
-        summ = 0.;
-        int ij = 0;
-        for (int i = 0; i < ms.ncomp; i++) {
-            for (int j = 0; j < as.num_sites; j++) {
-                summ += x[i] * ms.den * x[as.iA[j]] * (1 / as.XA[j] - 0.5) * dXA_dx[ij];
-                ij += 1;
-            }
-        }
-
-        Zassoc = summ;
-    }
-
-    // Ion term ---------------------------------------------------------------
-    double Zion = 0.0;
-    if (!cppargs.z.empty()) {
-        double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
-            double summ_sigma = 0.0;
-            for (int i = 0; i < ms.ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ_sigma += dh.alpha[i] * x[i] * q * q * dh.sigma_k[i];
-            }
-            Zion = -dh.kappa / 24. / PI / kb / t / (dielc * perm_vac) * summ_sigma;
-        }
-    }
-
-    double Z = Zid + Zhc + Zdisp + Zpolar + Zassoc + Zion;
-    vector<double> out(7, 0.0);
-    out[0] = Z;
-    out[1] = Zid;
-    out[2] = Zhc;
-    out[3] = Zdisp;
-    out[4] = Zpolar;
-    out[5] = Zassoc;
-    out[6] = Zion;
-    return out;
-}
-
-vector<double> pcsaft_ion_dh_debug_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
-    /**
-    Debug DH terms used in ion contributions.
-    Returns: [dielc, kappa, sum_z2, alpha(n), chi(n), sigma_k(n)]
-    */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    double dielc = dielc_mix(x, cppargs);
-    IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-
-    double sum_z2 = 0.0;
-    for (int i = 0; i < ms.ncomp; i++) {
-        sum_z2 += dh.alpha[i] * x[i] * cppargs.z[i] * cppargs.z[i];
-    }
-
-    vector<double> out;
-    out.reserve(3 + 3 * ms.ncomp);
-    out.push_back(dielc);
-    out.push_back(dh.kappa);
-    out.push_back(sum_z2);
-    for (int i = 0; i < ms.ncomp; i++) {
-        out.push_back(dh.alpha[i]);
-    }
-    for (int i = 0; i < ms.ncomp; i++) {
-        out.push_back(dh.chi[i]);
-    }
-    for (int i = 0; i < ms.ncomp; i++) {
-        out.push_back(dh.sigma_k[i]);
-    }
-    return out;
 }
 
 
@@ -1203,102 +712,183 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     /**
     Calculate the natural logarithm of the fugacity coefficients for one phase of the system.
     */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    int ncomp = ms.ncomp;
-    double ares_hs = calc_ares_hs(ms);
-    double Zhs = calc_Zhs(ms);
-    const vector<double> &d = ms.d;
-    const vector<double> &zeta = ms.zeta;
-    double den = ms.den;
-    double eta = ms.eta;
-    double m_avg = ms.m_avg;
-    const vector<double> &ghs = pm.ghs;
-    const vector<double> &denghs = pm.denghs;
-    const vector<double> &e_ij = pm.e_ij;
-    const vector<double> &s_ij = pm.s_ij;
-    double m2es3 = pm.m2es3;
-    double m2e2s3 = pm.m2e2s3;
-    double I1 = disp.I1;
-    double I2 = disp.I2;
-    double detI1_det = disp.detI1_det;
-    double detI2_det = disp.detI2_det;
-    double C1 = disp.C1;
-    double C2 = disp.C2;
-
-    double summ = 0.0;
+    int ncomp = x.size(); // number of components
+    vector<double> d (ncomp);
     for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) * log(pm.ghs[i * ncomp + i]);
+        d[i] = cppargs.s[i]*(1-0.12*exp(-3*cppargs.e[i]/t));
+    }
+    if (!cppargs.z.empty()) {
+        for (int i = 0; i < ncomp; i++) {
+            if (cppargs.z[i] != 0) {
+                d[i] = cppargs.s[i]*(1-0.12); // for ions the diameter is assumed to be temperature independent (see Held et al. 2014)
+            }
+        }
     }
 
-    double ares_hc = ms.m_avg * ares_hs - summ;
-    double ares_disp = -2 * PI * ms.den * disp.I1 * pm.m2es3 - PI * ms.den * ms.m_avg * disp.C1 * disp.I2 * pm.m2e2s3;
+    double den = rho*N_AV/1.0e30;
+
+    vector<double> zeta (4, 0);
+    double summ;
+    for (int i = 0; i < 4; i++) {
+        summ = 0;
+        for (int j = 0; j < ncomp; j++) {
+            summ += x[j]*cppargs.m[j]*pow(d[j], i);
+        }
+        zeta[i] = PI/6*den*summ;
+    }
+
+    double eta = zeta[3];
+    double m_avg = 0;
+    for (int i = 0; i < ncomp; i++) {
+        m_avg += x[i]*cppargs.m[i];
+    }
+
+    vector<double> ghs(ncomp*ncomp, 0);
+    vector<double> denghs(ncomp*ncomp, 0);
+    vector<double> e_ij(ncomp*ncomp, 0);
+    vector<double> s_ij(ncomp*ncomp, 0);
+    double m2es3 = 0.;
+    double m2e2s3 = 0.;
+    int idx = -1;
+    for (int i = 0; i < ncomp; i++) {
+        for (int j = 0; j < ncomp; j++) {
+            idx += 1;
+            if (cppargs.l_ij.empty()) {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.;
+            }
+            else {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.*(1-cppargs.l_ij[idx]);
+            }
+            if (!cppargs.z.empty()) {
+                if (cppargs.z[i]*cppargs.z[j] <= 0) { // for two cations or two anions e_ij is kept at zero to avoid dispersion between like ions (see Held et al. 2014)
+                    if (cppargs.k_ij.empty()) {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                    }
+                    else {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                    }
+                }
+            } else {
+                if (cppargs.k_ij.empty()) {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                }
+                else {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                }
+            }
+            m2es3 = m2es3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*e_ij[idx]/t*pow(s_ij[idx], 3);
+            m2e2s3 = m2e2s3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*pow(e_ij[idx]/t,2)*pow(s_ij[idx], 3);
+            ghs[idx] = 1/(1-zeta[3]) + (d[i]*d[j]/(d[i]+d[j]))*3*zeta[2]/(1-zeta[3])/(1-zeta[3]) +
+                    pow(d[i]*d[j]/(d[i]+d[j]), 2)*2*zeta[2]*zeta[2]/pow(1-zeta[3], 3);
+            denghs[idx] = zeta[3]/(1-zeta[3])/(1-zeta[3]) +
+                (d[i]*d[j]/(d[i]+d[j]))*(3*zeta[2]/(1-zeta[3])/(1-zeta[3]) +
+                6*zeta[2]*zeta[3]/pow(1-zeta[3], 3)) +
+                pow(d[i]*d[j]/(d[i]+d[j]), 2)*(4*zeta[2]*zeta[2]/pow(1-zeta[3], 3) +
+                6*zeta[2]*zeta[2]*zeta[3]/pow(1-zeta[3], 4));
+        }
+    }
+
+    double ares_hs = 1/zeta[0]*(3*zeta[1]*zeta[2]/(1-zeta[3]) + pow(zeta[2], 3.)/(zeta[3]*pow(1-zeta[3],2))
+            + (pow(zeta[2], 3.)/pow(zeta[3], 2.) - zeta[0])*log(1-zeta[3]));
+    double Zhs = zeta[3]/(1-zeta[3]) + 3.*zeta[1]*zeta[2]/zeta[0]/(1.-zeta[3])/(1.-zeta[3]) +
+        (3.*pow(zeta[2], 3.) - zeta[3]*pow(zeta[2], 3.))/zeta[0]/pow(1.-zeta[3], 3.);
+
+    static double a0[7] = { 0.9105631445, 0.6361281449, 2.6861347891, -26.547362491, 97.759208784, -159.59154087, 91.297774084 };
+    static double a1[7] = { -0.3084016918, 0.1860531159, -2.5030047259, 21.419793629, -65.255885330, 83.318680481, -33.746922930 };
+    static double a2[7] = { -0.0906148351, 0.4527842806, 0.5962700728, -1.7241829131, -4.1302112531, 13.776631870, -8.6728470368 };
+    static double b0[7] = { 0.7240946941, 2.2382791861, -4.0025849485, -21.003576815, 26.855641363, 206.55133841, -355.60235612 };
+    static double b1[7] = { -0.5755498075, 0.6995095521, 3.8925673390, -17.215471648, 192.67226447, -161.82646165, -165.20769346 };
+    static double b2[7] = { 0.0976883116, -0.2557574982, -9.1558561530, 20.642075974, -38.804430052, 93.626774077, -29.666905585 };
+
+    vector<double> a (7, 0);
+    vector<double> b (7, 0);
+    for (int i = 0; i < 7; i++) {
+        a[i] = a0[i] + (m_avg-1.)/m_avg*a1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*a2[i];
+        b[i] = b0[i] + (m_avg-1.)/m_avg*b1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*b2[i];
+    }
+
+    double detI1_det = 0.0;
+    double detI2_det = 0.0;
+    double I1 = 0.0;
+    double I2 = 0.0;
+    for (int i = 0; i < 7; i++) {
+        detI1_det += a[i]*(i+1)*pow(eta, i);
+        detI2_det += b[i]*(i+1)*pow(eta, i);
+        I2 += b[i]*pow(eta, i);
+        I1 += a[i]*pow(eta, i);
+    }
+    double C1 = 1./(1. + m_avg*(8*eta-2*eta*eta)/pow(1-eta, 4) + (1-m_avg)*(20*eta-27*eta*eta+12*pow(eta, 3)-2*pow(eta, 4))/pow((1-eta)*(2-eta), 2.0));
+    double C2 = -1.*C1*C1*(m_avg*(-4*eta*eta+20*eta+8)/pow(1-eta, 5) + (1-m_avg)*(2*pow(eta, 3)+12*eta*eta-48*eta+40)/pow((1-eta)*(2-eta), 3.0));
 
     summ = 0.0;
     for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) / pm.ghs[i * ncomp + i] * pm.denghs[i * ncomp + i];
+        summ += x[i]*(cppargs.m[i]-1)*log(ghs[i*ncomp+i]);
     }
 
-    double Zhc = ms.m_avg * Zhs - summ;
-    double Zdisp = -2 * PI * ms.den * disp.detI1_det * pm.m2es3 -
-        PI * ms.den * ms.m_avg * (disp.C1 * disp.detI2_det + disp.C2 * ms.eta * disp.I2) * pm.m2e2s3;
+    double ares_hc = m_avg*ares_hs - summ;
+    double ares_disp = -2*PI*den*I1*m2es3 - PI*den*m_avg*C1*I2*m2e2s3;
+
+    summ = 0.0;
+    for (int i = 0; i < ncomp; i++) {
+        summ += x[i]*(cppargs.m[i]-1)/ghs[i*ncomp+i]*denghs[i*ncomp+i];
+    }
+
+    double Zhc = m_avg*Zhs - summ;
+    double Zdisp = -2*PI*den*detI1_det*m2es3 - PI*den*m_avg*(C1*detI2_det + C2*eta*I2)*m2e2s3;
 
     vector<double> dghsii_dx(ncomp*ncomp, 0);
     vector<double> dahs_dx(ncomp, 0);
     vector<double> dzeta_dx(4, 0);
-    int idx = -1;
+    idx = -1;
     for (int i = 0; i < ncomp; i++) {
         for (int l = 0; l < 4; l++) {
-            dzeta_dx[l] = PI / 6. * ms.den * cppargs.m[i] * pow(ms.d[i], l);
+            dzeta_dx[l] = PI/6.*den*cppargs.m[i]*pow(d[i],l);
         }
         for (int j = 0; j < ncomp; j++) {
             idx += 1;
-            dghsii_dx[idx] = dzeta_dx[3] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + (ms.d[j] * ms.d[j] / (ms.d[j] + ms.d[j])) *
-                    (3 * dzeta_dx[2] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 6 * ms.zeta[2] * dzeta_dx[3] / pow(1 - ms.zeta[3], 3))
-                    + pow(ms.d[j] * ms.d[j] / (ms.d[j] + ms.d[j]), 2) * (4 * ms.zeta[2] * dzeta_dx[2] / pow(1 - ms.zeta[3], 3)
-                    + 6 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[3] / pow(1 - ms.zeta[3], 4));
+            dghsii_dx[idx] = dzeta_dx[3]/(1-zeta[3])/(1-zeta[3]) + (d[j]*d[j]/(d[j]+d[j]))*
+                    (3*dzeta_dx[2]/(1-zeta[3])/(1-zeta[3]) + 6*zeta[2]*dzeta_dx[3]/pow(1-zeta[3],3))
+                    + pow(d[j]*d[j]/(d[j]+d[j]),2)*(4*zeta[2]*dzeta_dx[2]/pow(1-zeta[3],3)
+                    + 6*zeta[2]*zeta[2]*dzeta_dx[3]/pow(1-zeta[3],4));
         }
-        dahs_dx[i] = -dzeta_dx[0] / ms.zeta[0] * ares_hs + 1 / ms.zeta[0] * (3 * (dzeta_dx[1] * ms.zeta[2]
-                + ms.zeta[1] * dzeta_dx[2]) / (1 - ms.zeta[3]) + 3 * ms.zeta[1] * ms.zeta[2] * dzeta_dx[3]
-                / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 3 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[2] / ms.zeta[3] / (1 - ms.zeta[3]) / (1 - ms.zeta[3])
-                + pow(ms.zeta[2], 3) * dzeta_dx[3] * (3 * ms.zeta[3] - 1) / ms.zeta[3] / ms.zeta[3] / pow(1 - ms.zeta[3], 3)
-                + log(1 - ms.zeta[3]) * ((3 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[2] * ms.zeta[3] -
-                2 * pow(ms.zeta[2], 3) * dzeta_dx[3]) / pow(ms.zeta[3], 3) - dzeta_dx[0]) +
-                (ms.zeta[0] - pow(ms.zeta[2], 3) / ms.zeta[3] / ms.zeta[3]) * dzeta_dx[3] / (1 - ms.zeta[3]));
+        dahs_dx[i] = -dzeta_dx[0]/zeta[0]*ares_hs + 1/zeta[0]*(3*(dzeta_dx[1]*zeta[2]
+                + zeta[1]*dzeta_dx[2])/(1-zeta[3]) + 3*zeta[1]*zeta[2]*dzeta_dx[3]
+                /(1-zeta[3])/(1-zeta[3]) + 3*zeta[2]*zeta[2]*dzeta_dx[2]/zeta[3]/(1-zeta[3])/(1-zeta[3])
+                + pow(zeta[2],3)*dzeta_dx[3]*(3*zeta[3]-1)/zeta[3]/zeta[3]/pow(1-zeta[3],3)
+                + log(1-zeta[3])*((3*zeta[2]*zeta[2]*dzeta_dx[2]*zeta[3] -
+                2*pow(zeta[2],3)*dzeta_dx[3])/pow(zeta[3],3) - dzeta_dx[0]) +
+                (zeta[0]-pow(zeta[2],3)/zeta[3]/zeta[3])*dzeta_dx[3]/(1-zeta[3]));
     }
 
     vector<double> dadisp_dx(ncomp, 0);
     vector<double> dahc_dx(ncomp, 0);
     double dzeta3_dx, daa_dx, db_dx, dI1_dx, dI2_dx, dm2es3_dx, dm2e2s3_dx, dC1_dx;
     for (int i = 0; i < ncomp; i++) {
-        dzeta3_dx = PI / 6. * ms.den * cppargs.m[i] * pow(ms.d[i], 3);
+        dzeta3_dx = PI/6.*den*cppargs.m[i]*pow(d[i],3);
         dI1_dx = 0.0;
         dI2_dx = 0.0;
         dm2es3_dx = 0.0;
         dm2e2s3_dx = 0.0;
         for (int l = 0; l < 7; l++) {
-            daa_dx = cppargs.m[i] / ms.m_avg / ms.m_avg * disp.a1[l] +
-                cppargs.m[i] / ms.m_avg / ms.m_avg * (3 - 4 / ms.m_avg) * disp.a2[l];
-            db_dx = cppargs.m[i] / ms.m_avg / ms.m_avg * disp.b1[l] +
-                cppargs.m[i] / ms.m_avg / ms.m_avg * (3 - 4 / ms.m_avg) * disp.b2[l];
-            dI1_dx += disp.a[l] * l * dzeta3_dx * pow(ms.eta, l - 1) + daa_dx * pow(ms.eta, l);
-            dI2_dx += disp.b[l] * l * dzeta3_dx * pow(ms.eta, l - 1) + db_dx * pow(ms.eta, l);
+            daa_dx = cppargs.m[i]/m_avg/m_avg*a1[l] + cppargs.m[i]/m_avg/m_avg*(3-4/m_avg)*a2[l];
+            db_dx = cppargs.m[i]/m_avg/m_avg*b1[l] + cppargs.m[i]/m_avg/m_avg*(3-4/m_avg)*b2[l];
+            dI1_dx += a[l]*l*dzeta3_dx*pow(eta,l-1) + daa_dx*pow(eta,l);
+            dI2_dx += b[l]*l*dzeta3_dx*pow(eta,l-1) + db_dx*pow(eta,l);
         }
         for (int j = 0; j < ncomp; j++) {
-            dm2es3_dx += x[j] * cppargs.m[j] * (pm.e_ij[i * ncomp + j] / t) * pow(pm.s_ij[i * ncomp + j], 3);
-            dm2e2s3_dx += x[j] * cppargs.m[j] * pow(pm.e_ij[i * ncomp + j] / t, 2) * pow(pm.s_ij[i * ncomp + j], 3);
-            dahc_dx[i] += x[j] * (cppargs.m[j] - 1) / pm.ghs[j * ncomp + j] * dghsii_dx[i * ncomp + j];
+            dm2es3_dx += x[j]*cppargs.m[j]*(e_ij[i*ncomp+j]/t)*pow(s_ij[i*ncomp+j],3);
+            dm2e2s3_dx += x[j]*cppargs.m[j]*pow(e_ij[i*ncomp+j]/t,2)*pow(s_ij[i*ncomp+j],3);
+            dahc_dx[i] += x[j]*(cppargs.m[j]-1)/ghs[j*ncomp+j]*dghsii_dx[i*ncomp+j];
         }
         dm2es3_dx = dm2es3_dx*2*cppargs.m[i];
         dm2e2s3_dx = dm2e2s3_dx*2*cppargs.m[i];
-        dahc_dx[i] = cppargs.m[i] * ares_hs + ms.m_avg * dahs_dx[i] - dahc_dx[i] - (cppargs.m[i] - 1) * log(pm.ghs[i * ncomp + i]);
-        dC1_dx = disp.C2 * dzeta3_dx - disp.C1 * disp.C1 * (cppargs.m[i] * (8 * ms.eta - 2 * ms.eta * ms.eta) / pow(1 - ms.eta, 4) -
-            cppargs.m[i] * (20 * ms.eta - 27 * ms.eta * ms.eta + 12 * pow(ms.eta, 3) - 2 * pow(ms.eta, 4)) / pow((1 - ms.eta) * (2 - ms.eta), 2));
+        dahc_dx[i] = cppargs.m[i]*ares_hs + m_avg*dahs_dx[i] - dahc_dx[i] - (cppargs.m[i]-1)*log(ghs[i*ncomp+i]);
+        dC1_dx = C2*dzeta3_dx - C1*C1*(cppargs.m[i]*(8*eta-2*eta*eta)/pow(1-eta,4) -
+            cppargs.m[i]*(20*eta-27*eta*eta+12*pow(eta,3)-2*pow(eta,4))/pow((1-eta)*(2-eta),2));
 
-        dadisp_dx[i] = -2 * PI * ms.den * (dI1_dx * pm.m2es3 + disp.I1 * dm2es3_dx) - PI * ms.den
-            * ((cppargs.m[i] * disp.C1 * disp.I2 + ms.m_avg * dC1_dx * disp.I2 + ms.m_avg * disp.C1 * dI2_dx) * pm.m2e2s3
-            + ms.m_avg * disp.C1 * disp.I2 * dm2e2s3_dx);
+        dadisp_dx[i] = -2*PI*den*(dI1_dx*m2es3 + I1*dm2es3_dx) - PI*den
+            *((cppargs.m[i]*C1*I2 + m_avg*dC1_dx*I2 + m_avg*C1*dI2_dx)*m2e2s3
+            + m_avg*C1*I2*dm2e2s3_dx);
     }
 
     vector<double> mu_hc(ncomp, 0);
@@ -1452,15 +1042,51 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     // Association term -------------------------------------------------------
     vector<double> mu_assoc(ncomp, 0);
     if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, den, x, ms, pm, cppargs);
-        int num_sites = as.num_sites;
-        vector<int> &iA = as.iA;
-        vector<double> &x_assoc = as.x_assoc;
-        vector<double> &XA = as.XA;
-        vector<double> &delta_ij = as.delta_ij;
+        int num_sites = 0;
+        vector<int> iA; //indices of associating compounds
+        for(std::vector<int>::iterator it = cppargs.assoc_num.begin(); it != cppargs.assoc_num.end(); ++it) {
+            num_sites += *it;
+            for (int i = 0; i < *it; i++) {
+                iA.push_back(it - cppargs.assoc_num.begin());
+            }
+        }
+
+        vector<double> x_assoc(num_sites); // mole fractions of only the associating compounds
+        for (int i = 0; i < num_sites; i++) {
+            x_assoc[i] = x[iA[i]];
+        }
+
+        vector<double> XA (num_sites, 0);
+        vector<double> delta_ij(num_sites * num_sites, 0);
+        int idxa = 0;
+        int idxi = 0; // index for the ii-th compound
+        int idxj = 0; // index for the jj-th compound
+        for (int i = 0; i < num_sites; i++) {
+            idxi = iA[i]*ncomp+iA[i];
+            for (int j = 0; j < num_sites; j++) {
+                idxj = iA[j]*ncomp+iA[j];
+                if (cppargs.assoc_matrix[idxa] != 0) {
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
+                    }
+                    else {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                    }
+                    delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
+                }
+                idxa += 1;
+            }
+            XA[i] = (-1 + sqrt(1+8*den*delta_ij[i*num_sites+i]))/(4*den*delta_ij[i*num_sites+i]);
+            if (!std::isfinite(XA[i])) {
+                XA[i] = 0.02;
+            }
+        }
 
         vector<double> ddelta_dx(num_sites * num_sites * ncomp, 0);
-        int idxa = 0;
         int idx_ddelta = 0;
         for (int k = 0; k < ncomp; k++) {
             int idxi = 0; // index for the ii-th compound
@@ -1494,6 +1120,21 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             }
         }
 
+        int ctr = 0;
+        double dif = 1000.;
+        vector<double> XA_old = XA;
+        while ((ctr < 100) && (dif > 1e-15)) {
+            ctr += 1;
+            XA = XA_find(XA_old, delta_ij, den, x_assoc);
+            dif = 0.;
+            for (int i = 0; i < num_sites; i++) {
+                dif += std::abs(XA[i] - XA_old[i]);
+            }
+            for (int i = 0; i < num_sites; i++) {
+                XA_old[i] = (XA[i] + XA_old[i]) / 2.0;
+            }
+        }
+
         vector<double> dXA_dx(num_sites*ncomp, 0);
         dXA_dx = dXAdx_find(cppargs.assoc_num, delta_ij, den, XA, ddelta_dx, x_assoc);
 
@@ -1516,118 +1157,71 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     vector<double> mu_ion(ncomp, 0);
     if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
+        vector<double> q(cppargs.z.begin(), cppargs.z.end());
+        for (int i = 0; i < ncomp; i++) {
+            q[i] = q[i] * E_CHRG;
+        }
+
+        summ = 0.0;
+        for (int i = 0; i < ncomp; i++) {
+            summ += cppargs.z[i] * cppargs.z[i] * x[i];
+        }
+        double kappa = sqrt(den * E_CHRG * E_CHRG / kb / t / (dielc * perm_vac) * summ);
+
+        if (kappa != 0) {
+            vector<double> chi(ncomp);
+            vector<double> sigma_k(ncomp);
             double summ1 = 0.0;
             double summ2 = 0.0;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ1 += dh.alpha[i] * x[i] * q * q * dh.sigma_k[i];
-                summ2 += dh.alpha[i] * x[i] * q * q;
+                chi[i] = 3 / pow(kappa * d[i], 3) * (1.5 + log(1 + kappa * d[i]) - 2 * (1 + kappa * d[i]) +
+                    0.5 * pow(1 + kappa * d[i], 2));
+                sigma_k[i] = -2 * chi[i] + 3 / (1 + kappa * d[i]);
+                summ1 += q[i] * q[i] * x[i] * sigma_k[i];
+                summ2 += x[i] * q[i] * q[i];
             }
 
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                mu_ion[i] = -q * q * dh.kappa / 24. / PI / kb / t / (dielc * perm_vac) *
-                    (2 * dh.chi[i] + summ1 / summ2);
+                mu_ion[i] = -q[i] * q[i] * kappa / 24. / PI / kb / t / (dielc * perm_vac) *
+                    (2 * chi[i] + summ1 / summ2);
             }
         }
     }
 
     // Born term ---------------------------------------------------------------
+
     vector<double> mu_born(ncomp, 0);
-    if (cppargs.born_enabled && !cppargs.z.empty()) {
+    if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        vector<double> dielc_dx = dielc_mix_dx(x, cppargs);
-        const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
-        const double dielc_ion = get_dielc_ion(cppargs);
-        const double factor_ion = (1.0 - 1.0 / dielc_ion);
-        vector<double> a_i(ncomp, 0.0);
+        double ares_born = ares_born_model(t, x, cppargs, d, dielc);
+        double Zborn = 0;
+
+        // Numerical derivative of ares_born w.r.t. x_i (unconstrained)
+        const double h = 1e-8;
+        vector<double> daborn_dx(ncomp, 0);
         for (int i = 0; i < ncomp; i++) {
-            a_i[i] = d[i];
-            if (!cppargs.d_born.empty()) {
-                a_i[i] = cppargs.d_born[i];
-            }
+            vector<double> x_pert = x;
+            x_pert[i] += h;
+            double dielc_pert = dielc_mix(x_pert, cppargs);
+            double ares_born_pert = ares_born_model(t, x_pert, cppargs, d, dielc_pert);
+            daborn_dx[i] = (ares_born_pert - ares_born) / h;
         }
 
-        if (cppargs.born_model == 0) {
-            double S = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) < 1e-12 || a_i[i] <= 0.0) {
-                    continue;
-                }
-                S += x[i] * cppargs.z[i] * cppargs.z[i] / a_i[i];
+        for (int i = 0; i < ncomp; i++) {
+            for (int j = 0; j < ncomp; j++) {
+                mu_born[i] += x[j] * daborn_dx[j];
             }
-            double ares_born = -C0 / t * (1.0 - 1.0 / dielc) * S;
-
-            vector<double> daborn_dx(ncomp, 0.0);
-            for (int k = 0; k < ncomp; k++) {
-                double term_ion = 0.0;
-                if (std::fabs(cppargs.z[k]) > 1e-12 && a_i[k] > 0.0) {
-                    term_ion = (1.0 - 1.0 / dielc) * cppargs.z[k] * cppargs.z[k] / a_i[k];
-                }
-                double term_eps = (dielc_dx[k] / (dielc * dielc)) * S;
-                daborn_dx[k] = -C0 / t * (term_ion + term_eps);
-            }
-
-            double sum_x_daborn = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                sum_x_daborn += x[i] * daborn_dx[i];
-            }
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) > 1e-12) {
-                    mu_born[i] = ares_born + daborn_dx[i] - sum_x_daborn;
-                }
-            }
-        } else {
-            const double factor = (1.0 - 1.0 / dielc);
-            const double f_min = f_mix_value(x, cppargs);
-            vector<double> d_eff(ncomp, 0.0);
-            double S1 = 0.0;
-            double S2 = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) < 1e-12 || a_i[i] <= 0.0) {
-                    continue;
-                }
-                double delta_d = (f_min - 1.0) / std::fabs(cppargs.z[i]) * a_i[i];
-                d_eff[i] = a_i[i] + delta_d;
-                if (d_eff[i] <= 0.0) {
-                    continue;
-                }
-                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_eff[i];
-                S2 += x[i] * cppargs.z[i] * cppargs.z[i] * (1.0 / a_i[i] - 1.0 / d_eff[i]);
-            }
-
-            double ares_born = -C0 / t * (factor * S1 + factor_ion * S2);
-            vector<double> daborn_dx(ncomp, 0.0);
-            for (int k = 0; k < ncomp; k++) {
-                double term_ion = 0.0;
-                if (std::fabs(cppargs.z[k]) > 1e-12 && d_eff[k] > 0.0 && a_i[k] > 0.0) {
-                    term_ion = factor * cppargs.z[k] * cppargs.z[k] / d_eff[k] +
-                        factor_ion * cppargs.z[k] * cppargs.z[k] * (1.0 / a_i[k] - 1.0 / d_eff[k]);
-                }
-                double term_eps = (dielc_dx[k] / (dielc * dielc)) * S1;
-                daborn_dx[k] = -C0 / t * (term_ion + term_eps);
-            }
-
-            double sum_x_daborn = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                sum_x_daborn += x[i] * daborn_dx[i];
-            }
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) > 1e-12) {
-                    mu_born[i] = ares_born + daborn_dx[i] - sum_x_daborn;
-                }
+            if (cppargs.z[i] != 0) {
+                mu_born[i] = ares_born + Zborn + daborn_dx[i] - mu_born[i];
+            } else {
+                mu_born[i] = 0;
             }
         }
     }
+
+
 
     double Z = pcsaft_Z_cpp(t, rho, x, cppargs);
-    if (!std::isfinite(Z) || Z <= 0.0) {
-        std::ostringstream oss;
-        oss << "pcsaft_lnfug_cpp: non-positive Z=" << std::setprecision(16) << Z;
-        throw SolutionError(oss.str());
-    }
 
     vector<double> mu(ncomp, 0);
     vector<double> lnfugcoef(ncomp, 0);
@@ -1639,458 +1233,7 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     return lnfugcoef;
 }
 
-vector<double> pcsaft_mu_res_contrib_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
-    /**
-    Calculate residual chemical potential contributions and ln(Z).
-    Returns a flat vector:
-      [lnZ,
-       mu_res (n),
-       mu_hc (n),
-       mu_disp (n),
-       mu_assoc (n),
-       mu_ion (n),
-       mu_born (n),
-       mu_polar (n)]
-    */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    int ncomp = ms.ncomp;
-    double ares_hs = calc_ares_hs(ms);
-    double Zhs = calc_Zhs(ms);
-    const vector<double> &d = ms.d;
-    const vector<double> &zeta = ms.zeta;
-    double den = ms.den;
-    double eta = ms.eta;
-    double m_avg = ms.m_avg;
-    const vector<double> &ghs = pm.ghs;
-    const vector<double> &denghs = pm.denghs;
-    const vector<double> &e_ij = pm.e_ij;
-    const vector<double> &s_ij = pm.s_ij;
-    double m2es3 = pm.m2es3;
-    double m2e2s3 = pm.m2e2s3;
-    double I1 = disp.I1;
-    double I2 = disp.I2;
-    double detI1_det = disp.detI1_det;
-    double detI2_det = disp.detI2_det;
-    double C1 = disp.C1;
-    double C2 = disp.C2;
-
-    double summ = 0.0;
-    for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) * log(pm.ghs[i * ncomp + i]);
-    }
-
-    double ares_hc = ms.m_avg * ares_hs - summ;
-    double ares_disp = -2 * PI * ms.den * disp.I1 * pm.m2es3 - PI * ms.den * ms.m_avg * disp.C1 * disp.I2 * pm.m2e2s3;
-
-    summ = 0.0;
-    for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) / pm.ghs[i * ncomp + i] * pm.denghs[i * ncomp + i];
-    }
-
-    double Zhc = ms.m_avg * Zhs - summ;
-    double Zdisp = -2 * PI * ms.den * disp.detI1_det * pm.m2es3 -
-        PI * ms.den * ms.m_avg * (disp.C1 * disp.detI2_det + disp.C2 * ms.eta * disp.I2) * pm.m2e2s3;
-
-    vector<double> dghsii_dx(ncomp*ncomp, 0);
-    vector<double> dahs_dx(ncomp, 0);
-    vector<double> dzeta_dx(4, 0);
-    int idx = -1;
-    for (int i = 0; i < ncomp; i++) {
-        for (int l = 0; l < 4; l++) {
-            dzeta_dx[l] = PI / 6. * ms.den * cppargs.m[i] * pow(ms.d[i], l);
-        }
-        for (int j = 0; j < ncomp; j++) {
-            idx += 1;
-            dghsii_dx[idx] = dzeta_dx[3] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + (ms.d[j] * ms.d[j] / (ms.d[j] + ms.d[j])) *
-                    (3 * dzeta_dx[2] / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 6 * ms.zeta[2] * dzeta_dx[3] / pow(1 - ms.zeta[3], 3))
-                    + pow(ms.d[j] * ms.d[j] / (ms.d[j] + ms.d[j]), 2) * (4 * ms.zeta[2] * dzeta_dx[2] / pow(1 - ms.zeta[3], 3)
-                    + 6 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[3] / pow(1 - ms.zeta[3], 4));
-        }
-        dahs_dx[i] = -dzeta_dx[0] / ms.zeta[0] * ares_hs + 1 / ms.zeta[0] * (3 * (dzeta_dx[1] * ms.zeta[2]
-                + ms.zeta[1] * dzeta_dx[2]) / (1 - ms.zeta[3]) + 3 * ms.zeta[1] * ms.zeta[2] * dzeta_dx[3]
-                / (1 - ms.zeta[3]) / (1 - ms.zeta[3]) + 3 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[2] / ms.zeta[3] / (1 - ms.zeta[3]) / (1 - ms.zeta[3])
-                + pow(ms.zeta[2], 3) * dzeta_dx[3] * (3 * ms.zeta[3] - 1) / ms.zeta[3] / ms.zeta[3] / pow(1 - ms.zeta[3], 3)
-                + log(1 - ms.zeta[3]) * ((3 * ms.zeta[2] * ms.zeta[2] * dzeta_dx[2] * ms.zeta[3] -
-                2 * pow(ms.zeta[2], 3) * dzeta_dx[3]) / pow(ms.zeta[3], 3) - dzeta_dx[0]) +
-                (ms.zeta[0] - pow(ms.zeta[2], 3) / ms.zeta[3] / ms.zeta[3]) * dzeta_dx[3] / (1 - ms.zeta[3]));
-    }
-
-    vector<double> dadisp_dx(ncomp, 0);
-    for (int i = 0; i < ncomp; i++) {
-        double term1 = -2 * PI * den * (I1 * 3 * cppargs.m[i] * pow(ms.d[i], 3) / (1 - ms.zeta[3]) - I1 * m2es3 / ms.zeta[3] * dzeta_dx[3]) -
-            PI * den * m_avg * (C1 * I2 * 3 * cppargs.m[i] * pow(ms.d[i], 3) / (1 - ms.zeta[3]) - C1 * I2 * m2e2s3 / ms.zeta[3] * dzeta_dx[3]);
-        double term2 = -2 * PI * den * detI1_det * m2es3 - PI * den * m_avg * (C1 * detI2_det + C2 * ms.eta * I2) * m2e2s3;
-        dadisp_dx[i] = term1 + term2;
-    }
-
-    vector<double> dahc_dx(ncomp, 0);
-    for (int i = 0; i < ncomp; i++) {
-        dahc_dx[i] = m_avg * dahs_dx[i] + (cppargs.m[i] - 1) * ares_hs - (cppargs.m[i] - 1) * log(ghs[i * ncomp + i]) -
-            (cppargs.m[i] - 1) * pm.denghs[i * ncomp + i] / ghs[i * ncomp + i] * dahs_dx[i];
-    }
-
-    vector<double> mu_hc(ncomp, 0);
-    vector<double> mu_disp(ncomp, 0);
-    for (int i = 0; i < ncomp; i++) {
-        for (int j = 0; j < ncomp; j++) {
-            mu_hc[i] += x[j] * dahc_dx[j];
-            mu_disp[i] += x[j] * dadisp_dx[j];
-        }
-        mu_hc[i] = ares_hc + Zhc + dahc_dx[i] - mu_hc[i];
-        mu_disp[i] = ares_disp + Zdisp + dadisp_dx[i] - mu_disp[i];
-    }
-
-    // Dipole term (Gross and Vrabec term) --------------------------------------
-    vector<double> mu_polar(ncomp, 0);
-    if (!cppargs.dipm.empty()) {
-        double A2 = 0.;
-        double A3 = 0.;
-        double dA2_det = 0.;
-        double dA3_det = 0.;
-        vector<double> dA2_dx(ncomp, 0);
-        vector<double> dA3_dx(ncomp, 0);
-
-        static double a0dip[5] = { 0.3043504, -0.1358588, 1.4493329, 0.3556977, -2.0653308 };
-        static double a1dip[5] = { 0.9534641, -1.8396383, 2.0131180, -7.3724958, 8.2374135 };
-        static double a2dip[5] = { -1.1610080, 4.5258607, 0.9751222, -12.281038, 5.9397575 };
-        static double b0dip[5] = { 0.2187939, -1.1896431, 1.1626889, 0, 0 };
-        static double b1dip[5] = { -0.5873164, 1.2489132, -0.5085280, 0, 0 };
-        static double b2dip[5] = { 3.4869576, -14.915974, 15.372022, 0, 0 };
-        static double c0dip[5] = { -0.0646774, 0.1975882, -0.8087562, 0.6902849, 0 };
-        static double c1dip[5] = { -0.9520876, 2.9924258, -2.3802636, -0.2701261, 0 };
-        static double c2dip[5] = { -0.6260979, 1.2924686, 1.6542783, -3.4396744, 0 };
-
-        const static double conv = 7242.702976750923; // conversion factor, see the note below Table 2 in Gross and Vrabec 2006
-
-        vector<double> dipmSQ (ncomp, 0);
-        for (int i = 0; i < ncomp; i++) {
-            dipmSQ[i] = pow(cppargs.dipm[i], 2.)/(cppargs.m[i]*cppargs.e[i]*pow(cppargs.s[i],3.))*conv;
-        }
-
-        vector<double> adip (5, 0);
-        vector<double> bdip (5, 0);
-        vector<double> cdip (5, 0);
-        double J2, dJ2_det, detJ2_det, J3, dJ3_det, detJ3_det;
-        double m_ij;
-        double m_ijk;
-        for (int i = 0; i < ncomp; i++) {
-            for (int j = 0; j < ncomp; j++) {
-                m_ij = sqrt(cppargs.m[i]*cppargs.m[j]);
-                if (m_ij > 2) {
-                    m_ij = 2;
-                }
-                J2 = 0.;
-                dJ2_det = 0.;
-                detJ2_det = 0;
-                for (int l = 0; l < 5; l++) {
-                    adip[l] = a0dip[l] + (m_ij-1)/m_ij*a1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*a2dip[l];
-                    bdip[l] = b0dip[l] + (m_ij-1)/m_ij*b1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*b2dip[l];
-                    J2 += (adip[l] + bdip[l]*e_ij[i*ncomp+j]/t)*pow(eta, l);
-                    dJ2_det += (adip[l] + bdip[l]*e_ij[i*ncomp+j]/t)*l*pow(eta, l-1);
-                    detJ2_det += (adip[l] + bdip[l]*e_ij[i*ncomp+j]/t)*(l+1)*pow(eta, l);
-                }
-                A2 += x[i]*x[j]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)/
-                    pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*J2;
-                dA2_det += x[i]*x[j]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*
-                    pow(s_ij[j*ncomp+j],3)/pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*detJ2_det;
-                if (i == j) {
-                    dA2_dx[i] += e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)
-                        /pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*
-                        (x[i]*x[j]*dJ2_det*PI/6.*den*cppargs.m[i]*pow(d[i],3) + 2*x[j]*J2);
-                }
-                else {
-                    dA2_dx[i] += e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)
-                        /pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*
-                        (x[i]*x[j]*dJ2_det*PI/6.*den*cppargs.m[i]*pow(d[i],3) + x[j]*J2);
-                }
-
-                for (int k = 0; k < ncomp; k++) {
-                    m_ijk = pow((cppargs.m[i]*cppargs.m[j]*cppargs.m[k]),1/3.);
-                    if (m_ijk > 2) {
-                        m_ijk = 2;
-                    }
-                    J3 = 0.;
-                    dJ3_det = 0.;
-                    detJ3_det = 0.;
-                    for (int l = 0; l < 5; l++) {
-                        cdip[l] = c0dip[l] + (m_ijk-1)/m_ijk*c1dip[l] + (m_ijk-1)/m_ijk*(m_ijk-2)/m_ijk*c2dip[l];
-                        J3 += cdip[l]*pow(eta, l);
-                        dJ3_det += cdip[l]*l*pow(eta, (l-1));
-                        detJ3_det += cdip[l]*(l+2)*pow(eta, (l+1));
-                    }
-                    A3 += x[i]*x[j]*x[k]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*
-                        pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/
-                        s_ij[j*ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                        dipmSQ[j]*dipmSQ[k]*J3;
-                    dA3_det += x[i]*x[j]*x[k]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*
-                        pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/
-                        s_ij[j*ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                        dipmSQ[j]*dipmSQ[k]*detJ3_det;
-                    if ((i == j) && (i == k)) {
-                        dA3_dx[i] += e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*pow(s_ij[i*ncomp+i],3)
-                            *pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/s_ij[j*ncomp+k]
-                            *cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*dipmSQ[j]
-                            *dipmSQ[k]*(x[i]*x[j]*x[k]*dJ3_det*PI/6.*den*cppargs.m[i]*pow(d[i],3)
-                            + 3*x[j]*x[k]*J3);
-                    }
-                    else if ((i == j) || (i == k)) {
-                        dA3_dx[i] += e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*pow(s_ij[i*ncomp+i],3)
-                            *pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/s_ij[j*ncomp+k]
-                            *cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*dipmSQ[j]
-                            *dipmSQ[k]*(x[i]*x[j]*x[k]*dJ3_det*PI/6.*den*cppargs.m[i]*pow(d[i],3)
-                            + 2*x[j]*x[k]*J3);
-                    }
-                    else {
-                        dA3_dx[i] += e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*pow(s_ij[i*ncomp+i],3)
-                            *pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/s_ij[j*ncomp+k]
-                            *cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*dipmSQ[j]
-                            *dipmSQ[k]*(x[i]*x[j]*x[k]*dJ3_det*PI/6.*den*cppargs.m[i]*pow(d[i],3)
-                            + x[j]*x[k]*J3);
-                    }
-                }
-            }
-        }
-
-        A2 = -PI*den*A2;
-        A3 = -4/3.*PI*PI*den*den*A3;
-        dA2_det = -PI*den/eta*dA2_det;
-        dA3_det = -4/3.*PI*PI*den/eta*den/eta*dA3_det;
-        for (int i = 0; i < ncomp; i++) {
-            dA2_dx[i] = -PI*den*dA2_dx[i];
-            dA3_dx[i] = -4/3.*PI*PI*den*den*dA3_dx[i];
-        }
-
-        vector<double> dapolar_dx(ncomp);
-        for (int i = 0; i < ncomp; i++) {
-            dapolar_dx[i] = (dA2_dx[i]*(1-A3/A2) + (dA3_dx[i]*A2 - A3*dA2_dx[i])/A2)/pow(1-A3/A2,2);
-        }
-
-        if (A2 != 0) {
-            double ares_polar = A2/(1-A3/A2);
-            double Zpolar = eta*((dA2_det*(1-A3/A2)+(dA3_det*A2-A3*dA2_det)/A2)/(1-A3/A2)/(1-A3/A2));
-            for (int i = 0; i < ncomp; i++) {
-                for (int j = 0; j < ncomp; j++) {
-                    mu_polar[i] += x[j]*dapolar_dx[j];
-                }
-                mu_polar[i] = ares_polar + Zpolar + dapolar_dx[i] - mu_polar[i];
-            }
-        }
-    }
-
-    // Association term -------------------------------------------------------
-    vector<double> mu_assoc(ncomp, 0);
-    if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, den, x, ms, pm, cppargs);
-        int num_sites = as.num_sites;
-        vector<int> &iA = as.iA;
-        vector<double> &x_assoc = as.x_assoc;
-        vector<double> &XA = as.XA;
-        vector<double> &delta_ij = as.delta_ij;
-
-        vector<double> ddelta_dx(num_sites * num_sites * ncomp, 0);
-        int idxa = 0;
-        int idx_ddelta = 0;
-        for (int k = 0; k < ncomp; k++) {
-            int idxi = 0;
-            int idxj = 0;
-            for (int i = 0; i < num_sites; i++) {
-                idxi = iA[i]*ncomp+iA[i];
-                for (int j = 0; j < num_sites; j++) {
-                    idxj = iA[j]*ncomp+iA[j];
-                    if (cppargs.assoc_matrix[idxa] != 0) {
-                        double eABij = _HUGE;
-                        double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
-                                s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
-
-                        if (cppargs.k_hb.empty()) {
-                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
-                        }
-                        else {
-                            eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
-                        }
-                        double dghsd_dx = PI/6.*cppargs.m[k]*(pow(d[k], 3)/(1-zeta[3])/(1-zeta[3]) + 3*d[iA[i]]*d[iA[j]]/
-                            (d[iA[i]]+d[iA[j]])*(d[k]*d[k]/(1-zeta[3])/(1-zeta[3])+2*pow(d[k], 3)*
-                            zeta[2]/pow(1-zeta[3], 3)) + 2*pow((d[iA[i]]*d[iA[j]]/(d[iA[i]]+d[iA[j]])), 2)*
-                            (2*d[k]*d[k]*zeta[2]/pow(1-zeta[3], 3)+3*(pow(d[k], 3)*zeta[2]*zeta[2]
-                            /pow(1-zeta[3], 4))));
-                        ddelta_dx[idx_ddelta] = dghsd_dx*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
-                    }
-                    idx_ddelta += 1;
-                    idxa += 1;
-                }
-            }
-        }
-
-        vector<double> dXA_dx(num_sites*ncomp, 0);
-        dXA_dx = dXAdx_find(cppargs.assoc_num, delta_ij, den, XA, ddelta_dx, x_assoc);
-
-
-        int ij = 0;
-        for (int i = 0; i < ncomp; i++) {
-            for (int j = 0; j < num_sites; j++) {
-                mu_assoc[i] += x[iA[j]]*den*dXA_dx[ij]*(1/XA[j]-0.5);
-                ij += 1;
-            }
-        }
-
-        for (int i = 0; i < num_sites; i++) {
-            mu_assoc[iA[i]] += log(XA[i]) - 0.5*XA[i] + 0.5;
-        }
-    }
-
-    // Ion term ---------------------------------------------------------------
-    vector<double> mu_ion(ncomp, 0);
-    if (!cppargs.z.empty()) {
-        double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
-            double summ1 = 0.0;
-            double summ2 = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ1 += dh.alpha[i] * x[i] * q * q * dh.sigma_k[i];
-                summ2 += dh.alpha[i] * x[i] * q * q;
-            }
-
-            for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                mu_ion[i] = -q * q * dh.kappa / 24. / PI / kb / t / (dielc * perm_vac) *
-                    (2 * dh.chi[i] + summ1 / summ2);
-            }
-        }
-    }
-
-    // Born term ---------------------------------------------------------------
-    vector<double> mu_born(ncomp, 0);
-    if (cppargs.born_enabled && !cppargs.z.empty()) {
-        double dielc = dielc_mix(x, cppargs);
-        vector<double> dielc_dx = dielc_mix_dx(x, cppargs);
-        const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
-        const double dielc_ion = get_dielc_ion(cppargs);
-        const double factor_ion = (1.0 - 1.0 / dielc_ion);
-        vector<double> a_i(ncomp, 0.0);
-        for (int i = 0; i < ncomp; i++) {
-            a_i[i] = d[i];
-            if (!cppargs.d_born.empty()) {
-                a_i[i] = cppargs.d_born[i];
-            }
-        }
-
-        if (cppargs.born_model == 0) {
-            double S = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) < 1e-12 || a_i[i] <= 0.0) {
-                    continue;
-                }
-                S += x[i] * cppargs.z[i] * cppargs.z[i] / a_i[i];
-            }
-            double ares_born = -C0 / t * (1.0 - 1.0 / dielc) * S;
-
-            vector<double> daborn_dx(ncomp, 0.0);
-            for (int k = 0; k < ncomp; k++) {
-                double term_ion = 0.0;
-                if (std::fabs(cppargs.z[k]) > 1e-12 && a_i[k] > 0.0) {
-                    term_ion = (1.0 - 1.0 / dielc) * cppargs.z[k] * cppargs.z[k] / a_i[k];
-                }
-                double term_eps = (dielc_dx[k] / (dielc * dielc)) * S;
-                daborn_dx[k] = -C0 / t * (term_ion + term_eps);
-            }
-
-            double sum_x_daborn = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                sum_x_daborn += x[i] * daborn_dx[i];
-            }
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) > 1e-12) {
-                    mu_born[i] = ares_born + daborn_dx[i] - sum_x_daborn;
-                }
-            }
-        } else {
-            const double factor = (1.0 - 1.0 / dielc);
-            const double f_min = f_mix_value(x, cppargs);
-            vector<double> d_eff(ncomp, 0.0);
-            double S1 = 0.0;
-            double S2 = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) < 1e-12 || a_i[i] <= 0.0) {
-                    continue;
-                }
-                double delta_d = (f_min - 1.0) / std::fabs(cppargs.z[i]) * a_i[i];
-                d_eff[i] = a_i[i] + delta_d;
-                if (d_eff[i] <= 0.0) {
-                    continue;
-                }
-                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_eff[i];
-                S2 += x[i] * cppargs.z[i] * cppargs.z[i] * (1.0 / a_i[i] - 1.0 / d_eff[i]);
-            }
-
-            double ares_born = -C0 / t * (factor * S1 + factor_ion * S2);
-            vector<double> daborn_dx(ncomp, 0.0);
-            for (int k = 0; k < ncomp; k++) {
-                double term_ion = 0.0;
-                if (std::fabs(cppargs.z[k]) > 1e-12 && d_eff[k] > 0.0 && a_i[k] > 0.0) {
-                    term_ion = factor * cppargs.z[k] * cppargs.z[k] / d_eff[k] +
-                        factor_ion * cppargs.z[k] * cppargs.z[k] * (1.0 / a_i[k] - 1.0 / d_eff[k]);
-                }
-                double term_eps = (dielc_dx[k] / (dielc * dielc)) * S1;
-                daborn_dx[k] = -C0 / t * (term_ion + term_eps);
-            }
-
-            double sum_x_daborn = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                sum_x_daborn += x[i] * daborn_dx[i];
-            }
-            for (int i = 0; i < ncomp; i++) {
-                if (std::fabs(cppargs.z[i]) > 1e-12) {
-                    mu_born[i] = ares_born + daborn_dx[i] - sum_x_daborn;
-                }
-            }
-        }
-    }
-
-    double Z = pcsaft_Z_cpp(t, rho, x, cppargs);
-    if (!std::isfinite(Z) || Z <= 0.0) {
-        std::ostringstream oss;
-        oss << "pcsaft_mu_res_contrib_cpp: non-positive Z=" << std::setprecision(16) << Z;
-        throw SolutionError(oss.str());
-    }
-    double lnZ = log(Z);
-
-    vector<double> mu_res(ncomp, 0);
-    for (int i = 0; i < ncomp; i++) {
-        mu_res[i] = mu_hc[i] + mu_disp[i] + mu_polar[i] + mu_assoc[i] + mu_ion[i] + mu_born[i];
-    }
-
-    vector<double> out;
-    out.reserve(1 + ncomp * 7);
-    out.push_back(lnZ);
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_res[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_hc[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_disp[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_assoc[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_ion[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_born[i]);
-    }
-    for (int i = 0; i < ncomp; i++) {
-        out.push_back(mu_polar[i]);
-    }
-    return out;
-}
-
-//    vector<double> mu_contr = {mu_hc[1], mu_disp[1], mu_assoc[1], mu_ion[1]};
+//    vector<double> mu_contr = {mu_hc[1], mu_disp[1], mu_assoc[1], mu_ion[1], mu_born[1]};
 //
 //    vector<double> lnfugcoef(5, 0);
 //    for (int i = 0; i < 5; i++) {
@@ -2134,33 +1277,108 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
     /**
     Calculate the residual Helmholtz energy
     */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    int ncomp = ms.ncomp;
-    const vector<double> &d = ms.d;
-    const vector<double> &zeta = ms.zeta;
-    double den = ms.den;
-    double eta = ms.eta;
-    double m_avg = ms.m_avg;
-    const vector<double> &ghs = pm.ghs;
-    const vector<double> &e_ij = pm.e_ij;
-    const vector<double> &s_ij = pm.s_ij;
-    double m2es3 = pm.m2es3;
-    double m2e2s3 = pm.m2e2s3;
-    double I1 = disp.I1;
-    double I2 = disp.I2;
-    double C1 = disp.C1;
-
-    double ares_hs = calc_ares_hs(ms);
-
-    double summ = 0.0;
+    int ncomp = x.size(); // number of components
+    vector<double> d (ncomp);
     for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) * log(ghs[i * ncomp + i]);
+        d[i] = cppargs.s[i]*(1-0.12*exp(-3*cppargs.e[i]/t));
+    }
+    if (!cppargs.z.empty()) {
+        for (int i = 0; i < ncomp; i++) {
+            if (cppargs.z[i] != 0) {
+                d[i] = cppargs.s[i]*(1-0.12); // for ions the diameter is assumed to be temperature independent (see Held et al. 2014)
+            }
+        }
     }
 
-    double ares_hc = m_avg * ares_hs - summ;
-    double ares_disp = -2 * PI * den * I1 * m2es3 - PI * den * m_avg * C1 * I2 * m2e2s3;
+    double den = rho*N_AV/1.0e30;
+
+    vector<double> zeta (4, 0);
+    double summ;
+    for (int i = 0; i < 4; i++) {
+        summ = 0;
+        for (int j = 0; j < ncomp; j++) {
+            summ += x[j]*cppargs.m[j]*pow(d[j], i);
+        }
+        zeta[i] = PI/6*den*summ;
+    }
+
+    double eta = zeta[3];
+    double m_avg = 0;
+    for (int i = 0; i < ncomp; i++) {
+        m_avg += x[i]*cppargs.m[i];
+    }
+
+    vector<double> ghs (ncomp*ncomp, 0);
+    vector<double> e_ij (ncomp*ncomp, 0);
+    vector<double> s_ij (ncomp*ncomp, 0);
+    double m2es3 = 0.;
+    double m2e2s3 = 0.;
+    int idx = -1;
+    for (int i = 0; i < ncomp; i++) {
+        for (int j = 0; j < ncomp; j++) {
+            idx += 1;
+            if (cppargs.l_ij.empty()) {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.;
+            }
+            else {
+                s_ij[idx] = (cppargs.s[i] + cppargs.s[j])/2.*(1-cppargs.l_ij[idx]);
+            }
+            if (!cppargs.z.empty()) {
+                if (cppargs.z[i]*cppargs.z[j] <= 0) { // for two cations or two anions e_ij is kept at zero to avoid dispersion between like ions (see Held et al. 2014)
+                    if (cppargs.k_ij.empty()) {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                    }
+                    else {
+                        e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                    }
+                }
+            } else {
+                if (cppargs.k_ij.empty()) {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j]);
+                }
+                else {
+                    e_ij[idx] = sqrt(cppargs.e[i]*cppargs.e[j])*(1-cppargs.k_ij[idx]);
+                }
+            }
+            m2es3 = m2es3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*e_ij[idx]/t*pow(s_ij[idx], 3);
+            m2e2s3 = m2e2s3 + x[i]*x[j]*cppargs.m[i]*cppargs.m[j]*pow(e_ij[idx]/t,2)*pow(s_ij[idx], 3);
+            ghs[idx] = 1/(1-zeta[3]) + (d[i]*d[j]/(d[i]+d[j]))*3*zeta[2]/(1-zeta[3])/(1-zeta[3]) +
+                pow(d[i]*d[j]/(d[i]+d[j]), 2)*2*zeta[2]*zeta[2]/pow(1-zeta[3], 3);
+        }
+    }
+
+    double ares_hs = 1/zeta[0]*(3*zeta[1]*zeta[2]/(1-zeta[3]) + pow(zeta[2], 3.)/(zeta[3]*pow(1-zeta[3],2))
+            + (pow(zeta[2], 3.)/pow(zeta[3], 2.) - zeta[0])*log(1-zeta[3]));
+
+    static double a0[7] = { 0.9105631445, 0.6361281449, 2.6861347891, -26.547362491, 97.759208784, -159.59154087, 91.297774084 };
+    static double a1[7] = { -0.3084016918, 0.1860531159, -2.5030047259, 21.419793629, -65.255885330, 83.318680481, -33.746922930 };
+    static double a2[7] = { -0.0906148351, 0.4527842806, 0.5962700728, -1.7241829131, -4.1302112531, 13.776631870, -8.6728470368 };
+    static double b0[7] = { 0.7240946941, 2.2382791861, -4.0025849485, -21.003576815, 26.855641363, 206.55133841, -355.60235612 };
+    static double b1[7] = { -0.5755498075, 0.6995095521, 3.8925673390, -17.215471648, 192.67226447, -161.82646165, -165.20769346 };
+    static double b2[7] = { 0.0976883116, -0.2557574982, -9.1558561530, 20.642075974, -38.804430052, 93.626774077, -29.666905585 };
+
+    vector<double> a (7, 0);
+    vector<double> b (7, 0);
+    for (int i = 0; i < 7; i++) {
+        a[i] = a0[i] + (m_avg-1.)/m_avg*a1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*a2[i];
+        b[i] = b0[i] + (m_avg-1.)/m_avg*b1[i] + (m_avg-1.)/m_avg*(m_avg-2.)/m_avg*b2[i];
+    }
+
+    double I1 = 0.0;
+    double I2 = 0.0;
+    for (int i = 0; i < 7; i++) {
+        I1 += a[i]*pow(eta, i);
+        I2 += b[i]*pow(eta, i);
+    }
+    double C1 = 1./(1. + m_avg*(8*eta-2*eta*eta)/pow(1-eta, 4) + (1-m_avg)*(20*eta-27*eta*eta+12*pow(eta, 3)-2*pow(eta, 4))/pow((1-eta)*(2-eta), 2.0));
+
+    summ = 0.0;
+    for (int i = 0; i < ncomp; i++) {
+        summ += x[i]*(cppargs.m[i]-1)*log(ghs[i*ncomp+i]);
+    }
+
+    double ares_hc = m_avg*ares_hs - summ;
+    double ares_disp = -2*PI*den*I1*m2es3 - PI*den*m_avg*C1*I2*m2e2s3;
 
     // Dipole term (Gross and Vrabec term) --------------------------------------
     double ares_polar = 0.;
@@ -2235,10 +1453,73 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
     // Association term -------------------------------------------------------
     double ares_assoc = 0.;
     if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, den, x, ms, pm, cppargs);
+        int num_sites = 0;
+        vector<int> iA; //indices of associating compounds
+        for(std::vector<int>::iterator it = cppargs.assoc_num.begin(); it != cppargs.assoc_num.end(); ++it) {
+            num_sites += *it;
+            for (int i = 0; i < *it; i++) {
+                iA.push_back(it - cppargs.assoc_num.begin());
+            }
+        }
+
+        vector<double> x_assoc(num_sites); // mole fractions of only the associating compounds
+        for (int i = 0; i < num_sites; i++) {
+            x_assoc[i] = x[iA[i]];
+        }
+
+        vector<double> XA (num_sites, 0);
+        vector<double> delta_ij(num_sites * num_sites, 0);
+        int idxa = 0;
+        int idxi = 0; // index for the ii-th compound
+        int idxj = 0; // index for the jj-th compound
+        for (int i = 0; i < num_sites; i++) {
+            idxi = iA[i]*ncomp+iA[i];
+            for (int j = 0; j < num_sites; j++) {
+                idxj = iA[j]*ncomp+iA[j];
+                if (cppargs.assoc_matrix[idxa] != 0) {
+                    double eABij = _HUGE;
+                    double volABij = sqrt(cppargs.vol_a[iA[i]]*cppargs.vol_a[iA[j]])*pow(sqrt(s_ij[idxi]*
+                            s_ij[idxj])/(0.5*(s_ij[idxi]+s_ij[idxj])), 3);
+
+                    if (cppargs.k_hb.empty()) {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.;
+                    }
+                    else {
+                        eABij = (cppargs.e_assoc[iA[i]]+cppargs.e_assoc[iA[j]])/2.*(1-cppargs.k_hb[iA[i]*ncomp+iA[j]]);
+                    }
+
+                    delta_ij[idxa] = ghs[iA[i]*ncomp+iA[j]]*(exp(eABij/t)-1)*pow(s_ij[iA[i]*ncomp+iA[j]], 3)*volABij;
+
+
+                }
+                idxa += 1;
+            }
+
+            XA[i] = (-1 + sqrt(1+8*den*delta_ij[i*num_sites+i]))/(4*den*delta_ij[i*num_sites+i]);
+            if (!std::isfinite(XA[i])) {
+                XA[i] = 0.02;
+            }
+        }
+
+        int ctr = 0;
+        double dif = 1000.;
+        vector<double> XA_old = XA;
+        while ((ctr < 100) && (dif > 1e-15)) {
+            ctr += 1;
+            XA = XA_find(XA_old, delta_ij, den, x_assoc);
+
+            dif = 0.;
+            for (int i = 0; i < num_sites; i++) {
+                dif += std::abs(XA[i] - XA_old[i]);
+            }
+            for (int i = 0; i < num_sites; i++) {
+                XA_old[i] = (XA[i] + XA_old[i]) / 2.0;
+            }
+        }
+
         ares_assoc = 0.;
-        for (int i = 0; i < as.num_sites; i++) {
-            ares_assoc += x[as.iA[i]] * (log(as.XA[i]) - 0.5 * as.XA[i] + 0.5);
+        for (int i = 0; i < num_sites; i++) {
+            ares_assoc += x[iA[i]]*(log(XA[i])-0.5*XA[i] + 0.5);
         }
     }
 
@@ -2247,171 +1528,39 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
     double ares_ion = 0.;
     if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
-            summ = 0.0;
+        vector<double> q(cppargs.z.begin(), cppargs.z.end());
+        for (int i = 0; i < ncomp; i++) {
+            q[i] = q[i] * E_CHRG;
+        }
+
+        summ = 0.;
+        for (int i = 0; i < ncomp; i++) {
+            summ += cppargs.z[i] * cppargs.z[i] * x[i];
+        }
+        double kappa = sqrt(den * E_CHRG * E_CHRG / kb / t / (dielc * perm_vac) * summ);
+
+        if (kappa != 0) {
+            vector<double> chi(ncomp);
+            summ = 0.;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ += dh.alpha[i] * x[i] * q * q * dh.chi[i];
+                chi[i] = 3 / pow(kappa * d[i], 3) * (1.5 + log(1 + kappa * d[i]) - 2 * (1 + kappa * d[i]) +
+                    0.5 * pow(1 + kappa * d[i], 2));
+                summ += x[i] * q[i] * q[i] * chi[i] * kappa;
             }
-            ares_ion = -1 / 12. / PI / kb / t / (dielc * perm_vac) * dh.kappa * summ;
+
+            ares_ion = -1 / 12. / PI / kb / t / (dielc * perm_vac) * summ;
         }
     }
 
-    double ares_born = 0.0;
-    if (cppargs.born_enabled) {
+    // Born term ---------------------------------------------------------------
+    double ares_born = 0;
+    if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        ares_born = ares_born_model(t, x, ms, dielc, cppargs);
+        ares_born = ares_born_model(t, x, cppargs, d, dielc);
     }
 
     double ares = ares_hc + ares_disp + ares_polar + ares_assoc + ares_ion + ares_born;
     return ares;
-}
-
-vector<double> pcsaft_ares_contrib_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
-    /**
-    Calculate residual Helmholtz energy contributions.
-    Returns: [ares_total, ares_hc, ares_disp, ares_assoc, ares_ion, ares_born, ares_polar]
-    */
-    MixState ms = build_mix_state(t, rho, x, cppargs);
-    PairMix pm = build_pair_mix(ms, t, x, cppargs);
-    DispersionCoeffs disp = build_dispersion(ms);
-    int ncomp = ms.ncomp;
-    const vector<double> &d = ms.d;
-    const vector<double> &zeta = ms.zeta;
-    double den = ms.den;
-    double eta = ms.eta;
-    double m_avg = ms.m_avg;
-    const vector<double> &ghs = pm.ghs;
-    const vector<double> &e_ij = pm.e_ij;
-    const vector<double> &s_ij = pm.s_ij;
-    double m2es3 = pm.m2es3;
-    double m2e2s3 = pm.m2e2s3;
-    double I1 = disp.I1;
-    double I2 = disp.I2;
-    double C1 = disp.C1;
-
-    double ares_hs = calc_ares_hs(ms);
-
-    double summ = 0.0;
-    for (int i = 0; i < ncomp; i++) {
-        summ += x[i] * (cppargs.m[i] - 1) * log(ghs[i * ncomp + i]);
-    }
-
-    double ares_hc = m_avg * ares_hs - summ;
-    double ares_disp = -2 * PI * den * I1 * m2es3 - PI * den * m_avg * C1 * I2 * m2e2s3;
-
-    // Dipole term (Gross and Vrabec term) --------------------------------------
-    double ares_polar = 0.;
-    if (!cppargs.dipm.empty()) {
-        double A2 = 0.;
-        double A3 = 0.;
-        vector<double> dipmSQ (ncomp, 0);
-
-        static double a0dip[5] = { 0.3043504, -0.1358588, 1.4493329, 0.3556977, -2.0653308 };
-        static double a1dip[5] = { 0.9534641, -1.8396383, 2.0131180, -7.3724958, 8.2374135 };
-        static double a2dip[5] = { -1.1610080, 4.5258607, 0.9751222, -12.281038, 5.9397575 };
-        static double b0dip[5] = { 0.2187939, -1.1896431, 1.1626889, 0, 0 };
-        static double b1dip[5] = { -0.5873164, 1.2489132, -0.5085280, 0, 0 };
-        static double b2dip[5] = { 3.4869576, -14.915974, 15.372022, 0, 0 };
-        static double c0dip[5] = { -0.0646774, 0.1975882, -0.8087562, 0.6902849, 0 };
-        static double c1dip[5] = { -0.9520876, 2.9924258, -2.3802636, -0.2701261, 0 };
-        static double c2dip[5] = { -0.6260979, 1.2924686, 1.6542783, -3.4396744, 0 };
-
-        const static double conv = 7242.702976750923;
-
-        for (int i = 0; i < ncomp; i++) {
-            dipmSQ[i] = pow(cppargs.dipm[i], 2.)/(cppargs.m[i]*cppargs.e[i]*pow(cppargs.s[i],3.))*conv;
-        }
-
-        vector<double> adip (5, 0);
-        vector<double> bdip (5, 0);
-        vector<double> cdip (5, 0);
-        double J2, J3;
-        double m_ij;
-        double m_ijk;
-        for (int i = 0; i < ncomp; i++) {
-            for (int j = 0; j < ncomp; j++) {
-                m_ij = sqrt(cppargs.m[i]*cppargs.m[j]);
-                if (m_ij > 2) {
-                    m_ij = 2;
-                }
-                J2 = 0.;
-                for (int l = 0; l < 5; l++) {
-                    adip[l] = a0dip[l] + (m_ij-1)/m_ij*a1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*a2dip[l];
-                    bdip[l] = b0dip[l] + (m_ij-1)/m_ij*b1dip[l] + (m_ij-1)/m_ij*(m_ij-2)/m_ij*b2dip[l];
-                    J2 += (adip[l] + bdip[l]*e_ij[j*ncomp+j]/t)*pow(eta, l);
-                }
-                A2 += x[i]*x[j]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)/
-                    pow(s_ij[i*ncomp+j],3)*cppargs.dip_num[i]*cppargs.dip_num[j]*dipmSQ[i]*dipmSQ[j]*J2;
-
-                for (int k = 0; k < ncomp; k++) {
-                    m_ijk = pow((cppargs.m[i]*cppargs.m[j]*cppargs.m[k]),1/3.);
-                    if (m_ijk > 2) {
-                        m_ijk = 2;
-                    }
-                    J3 = 0.;
-                    for (int l = 0; l < 5; l++) {
-                        cdip[l] = c0dip[l] + (m_ijk-1)/m_ijk*c1dip[l] + (m_ijk-1)/m_ijk*(m_ijk-2)/m_ijk*c2dip[l];
-                        J3 += cdip[l]*pow(eta, l);
-                    }
-                    A3 += x[i]*x[j]*x[k]*e_ij[i*ncomp+i]/t*e_ij[j*ncomp+j]/t*e_ij[k*ncomp+k]/t*
-                        pow(s_ij[i*ncomp+i],3)*pow(s_ij[j*ncomp+j],3)*pow(s_ij[k*ncomp+k],3)/s_ij[i*ncomp+j]/s_ij[i*ncomp+k]/
-                        s_ij[j*ncomp+k]*cppargs.dip_num[i]*cppargs.dip_num[j]*cppargs.dip_num[k]*dipmSQ[i]*
-                        dipmSQ[j]*dipmSQ[k]*J3;
-                }
-            }
-        }
-
-        A2 = -PI*den*A2;
-        A3 = -4/3.*PI*PI*den*den*A3;
-
-        if (A2 != 0) {
-            ares_polar = A2/(1-A3/A2);
-        }
-    }
-
-    // Association term -------------------------------------------------------
-    double ares_assoc = 0.;
-    if (!cppargs.e_assoc.empty()) {
-        AssocState as = build_assoc_state(t, den, x, ms, pm, cppargs);
-        ares_assoc = 0.;
-        for (int i = 0; i < as.num_sites; i++) {
-            ares_assoc += x[as.iA[i]] * (log(as.XA[i]) - 0.5 * as.XA[i] + 0.5);
-        }
-    }
-
-    // Ion term ---------------------------------------------------------------
-    double ares_ion = 0.;
-    if (!cppargs.z.empty()) {
-        double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
-        if (dh.kappa != 0.0) {
-            summ = 0.0;
-            for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ += dh.alpha[i] * x[i] * q * q * dh.chi[i];
-            }
-            ares_ion = -1 / 12. / PI / kb / t / (dielc * perm_vac) * dh.kappa * summ;
-        }
-    }
-
-    double ares_born = 0.0;
-    if (cppargs.born_enabled) {
-        double dielc = dielc_mix(x, cppargs);
-        ares_born = ares_born_model(t, x, ms, dielc, cppargs);
-    }
-
-    double ares = ares_hc + ares_disp + ares_polar + ares_assoc + ares_ion + ares_born;
-    vector<double> out(7, 0.0);
-    out[0] = ares;
-    out[1] = ares_hc;
-    out[2] = ares_disp;
-    out[3] = ares_assoc;
-    out[4] = ares_ion;
-    out[5] = ares_born;
-    out[6] = ares_polar;
-    return out;
 }
 
 
@@ -2421,7 +1570,6 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
     constant density.
     */
     int ncomp = x.size(); // number of components
-    MixState ms = build_mix_state(t, rho, x, cppargs);
     vector<double> d (ncomp), dd_dt(ncomp);
     for (int i = 0; i < ncomp; i++) {
         d[i] = cppargs.s[i]*(1-0.12*exp(-3*cppargs.e[i]/t));
@@ -2721,31 +1869,75 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
     double dadt_ion = 0.;
     if (!cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
+        vector<double> q(cppargs.z.begin(), cppargs.z.end());
+        for (int i = 0; i < ncomp; i++) {
+            q[i] = q[i] * E_CHRG;
+        }
+
+        summ = 0.;
+        for (int i = 0; i < ncomp; i++) {
+            summ += cppargs.z[i] * cppargs.z[i] * x[i];
+        }
+        double kappa = sqrt(den * E_CHRG * E_CHRG / kb / t / (dielc * perm_vac) * summ);
+
         double dkappa_dt;
-        if (dh.kappa != 0.0) {
+        if (kappa != 0) {
+            vector<double> chi(ncomp);
             vector<double> dchikap_dk(ncomp);
-            double sum_z2 = 0.0;
             for (int i = 0; i < ncomp; i++) {
-                double kappaa = dh.kappa * dh.a_eff[i];
-                if (kappaa != 0.0) {
-                    dchikap_dk[i] = -2.0 * dh.chi[i] + 3.0 / (1.0 + kappaa);
-                }
-                sum_z2 += dh.alpha[i] * x[i] * cppargs.z[i] * cppargs.z[i];
+                chi[i] = 3 / pow(kappa * d[i], 3) * (1.5 + log(1 + kappa * d[i]) - 2 * (1 + kappa * d[i]) +
+                    0.5 * pow(1 + kappa * d[i], 2));
+                dchikap_dk[i] = -2 * chi[i] + 3 / (1 + kappa * d[i]);
             }
-            dkappa_dt = -0.5 * den * E_CHRG * E_CHRG / kb / t / t / (dielc * perm_vac) * sum_z2 / dh.kappa;
+            dkappa_dt = -0.5 * den * E_CHRG * E_CHRG / kb / t / t / (dielc * perm_vac) * summ / kappa;
 
             summ = 0.;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ += dh.alpha[i] * x[i] * q * q * (dchikap_dk[i] * dkappa_dt / t - dh.kappa * dh.chi[i] / t / t);
+                summ += x[i] * q[i] * q[i] * (dchikap_dk[i] * dkappa_dt / t - kappa * chi[i] / t / t);
             }
             dadt_ion = -1.0/12.0/PI/kb/(dielc*perm_vac)*summ;
         }
     }
 
 
-    double dadt = dadt_hc + dadt_disp + dadt_assoc + dadt_polar + dadt_ion;
+    // Born term ---------------------------------------------------------------
+
+    double dadt_born = 0.;
+    if (!cppargs.z.empty()) {
+        double dielc = dielc_mix(x, cppargs);
+        const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
+        const double factor = (1.0 - 1.0 / dielc);
+        const double f_mix = f_mix_value(x, cppargs);
+
+        double S1 = 0.0;
+        for (int i = 0; i < ncomp; i++) {
+            if (std::fabs(cppargs.z[i]) < 1e-12) {
+                continue;
+            }
+            double d_born = d[i];
+            if (!cppargs.d_born.empty()) {
+                d_born = cppargs.d_born[i];
+            }
+            if (d_born <= 0.0) {
+                continue;
+            }
+            if (cppargs.born_model == 0) {
+                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_born;
+            } else {
+                double delta_d = f_mix * std::fabs(cppargs.z[i]) * d_born;
+                double d_eff = d_born + delta_d;
+                if (d_eff <= 0.0) {
+                    continue;
+                }
+                S1 += x[i] * cppargs.z[i] * cppargs.z[i] / d_eff;
+            }
+        }
+
+        dadt_born = C0 / (t * t) * factor * S1;
+
+    }
+
+    double dadt = dadt_hc + dadt_disp + dadt_assoc + dadt_polar + dadt_ion + dadt_born;
     return dadt;
 }
 
@@ -2782,68 +1974,6 @@ double pcsaft_gres_cpp(double t, double rho, vector<double> x, add_args &cppargs
 
     double gres = (ares + (Z - 1) - log(Z))*kb*N_AV*t; // Equation A.50 from Gross and Sadowski 2001
     return gres;
-}
-
-vector<double> pcsaft_lnfugcoef_inf_dil_cpp(double t, double p, vector<double> x, add_args &cppargs) {
-    /**
-    Infinite-dilution ln(fugacity coefficients) for solutes in a given solvent.
-
-    Assumes the first component is the solvent and all others are ions (z != 0).
-    Returns ln(phi) for the solvent at x_solvent=1 and solutes at infinite dilution.
-    */
-    validate_inf_dilution_inputs(x, cppargs);
-    const int ncomp = x.size();
-    const double eps = 1e-12;
-
-    vector<double> lnphi_inf(ncomp, 0.0);
-    vector<double> x_solvent(ncomp, 0.0);
-    x_solvent[0] = 1.0;
-
-    double rho_solvent = pcsaft_den_cpp(t, p, x_solvent, 0, cppargs);
-    vector<double> lnphi_solvent = pcsaft_lnfug_cpp(t, rho_solvent, x_solvent, cppargs);
-    lnphi_inf[0] = lnphi_solvent[0];
-
-    for (int i = 1; i < ncomp; i++) {
-        vector<double> x_ref(ncomp, 0.0);
-        x_ref[0] = 1.0 - eps;
-        x_ref[i] = eps;
-        double rho_ref = pcsaft_den_cpp(t, p, x_ref, 0, cppargs);
-        vector<double> lnphi_ref = pcsaft_lnfug_cpp(t, rho_ref, x_ref, cppargs);
-        lnphi_inf[i] = lnphi_ref[i];
-    }
-    return lnphi_inf;
-}
-
-vector<double> pcsaft_gsolv_cpp(double t, double p, vector<double> x, add_args &cppargs) {
-    /**
-    Gibbs energy of solvation from infinite-dilution fugacity coefficients.
-    */
-    const double Rgas = kb * N_AV;
-    vector<double> lnphi_inf = pcsaft_lnfugcoef_inf_dil_cpp(t, p, x, cppargs);
-    const int ncomp = lnphi_inf.size();
-    vector<double> gsolv(ncomp, 0.0);
-    for (int i = 0; i < ncomp; i++) {
-        gsolv[i] = Rgas * t * lnphi_inf[i];
-    }
-    return gsolv;
-}
-
-vector<double> pcsaft_gtransfer_cpp(double t, double p, vector<double> x1, add_args &cppargs1, vector<double> x2, add_args &cppargs2) {
-    /**
-    Gibbs energy of transfer at infinite dilution from solvent S1 to solvent S2.
-    */
-    if (x1.size() != x2.size()) {
-        throw ValueError("gibbs transfer requires the same number of components in both mixtures");
-    }
-    const double Rgas = kb * N_AV;
-    vector<double> lnphi_inf_1 = pcsaft_lnfugcoef_inf_dil_cpp(t, p, x1, cppargs1);
-    vector<double> lnphi_inf_2 = pcsaft_lnfugcoef_inf_dil_cpp(t, p, x2, cppargs2);
-    const int ncomp = lnphi_inf_1.size();
-    vector<double> gtr(ncomp, 0.0);
-    for (int i = 0; i < ncomp; i++) {
-        gtr[i] = Rgas * t * (lnphi_inf_2[i] - lnphi_inf_1[i]);
-    }
-    return gtr;
 }
 
 

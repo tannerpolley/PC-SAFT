@@ -1498,6 +1498,10 @@ def create_struct(params):
     """Convert PC-SAFT parameters to a C++ struct."""
     cdef add_args cppargs
     cppargs.born_model = 1
+    cppargs.born_enabled = 1
+    cppargs.bjerrum_model = 0
+    cppargs.dielc_rule = 1
+    cppargs.dielc_ion = 0.0
 
     cppargs.m = np_to_vector_double(params['m'])
     cppargs.s = np_to_vector_double(params['s'])
@@ -1524,6 +1528,12 @@ def create_struct(params):
         cppargs.f_solv = np_to_vector_double(params['f_solv'])
     if 'born_model' in params:
         cppargs.born_model = <int>params['born_model']
+    if 'born_enabled' in params:
+        cppargs.born_enabled = <int>params['born_enabled']
+    if 'bjerrum_model' in params:
+        cppargs.bjerrum_model = <int>params['bjerrum_model']
+    if 'dielc_ion' in params:
+        cppargs.dielc_ion = <double>params['dielc_ion']
     if 'assoc_num' in params:
         cppargs.assoc_num = np_to_vector_int(params['assoc_num'])
     if 'assoc_matrix' in params:
@@ -1532,5 +1542,271 @@ def create_struct(params):
         cppargs.k_hb = np_to_vector_double(params['k_hb'])
     if 'l_ij' in params:
         cppargs.l_ij = np_to_vector_double(params['l_ij'])
+    if 'dielc_rule' in params:
+        cppargs.dielc_rule = <int>params['dielc_rule']
 
     return cppargs
+
+
+# ---------------------------------------------------------------------------
+# Salt-basis helpers and MIAC (v3-compatible surface API)
+# ---------------------------------------------------------------------------
+
+def _normalize_user_params(user_params):
+    if isinstance(user_params, dict):
+        return user_params
+    return {}
+
+def _parse_salt_name(salt_name):
+    if not isinstance(salt_name, str):
+        raise InputError('salt name must be a string.')
+    plus = salt_name.find('+')
+    minus = salt_name.find('-', plus + 1)
+    if plus == -1 or minus == -1 or minus < plus:
+        raise InputError('salt name must be like \"Mg2+Cl-\". got: {}'.format(salt_name))
+    cation = salt_name[:plus + 1]
+    anion = salt_name[plus + 1:]
+    if not anion.endswith('-'):
+        raise InputError('salt name must end with an anion like \"Cl-\". got: {}'.format(salt_name))
+    return cation, anion
+
+def _resolve_component_spec(species, user_params):
+    user_params = _normalize_user_params(user_params)
+    roles = user_params.get('component_roles')
+    if roles is None:
+        return None, None
+    names = user_params.get('component_names')
+    if names is None:
+        if species is not None:
+            names = list(species)
+        else:
+            raise InputError('component_names is required when species is not provided.')
+    roles = [str(role).lower() for role in list(roles)]
+    names = list(names)
+    if len(names) != len(roles):
+        raise InputError('component_names and component_roles must have the same length.')
+    return names, roles
+
+def _derive_ionic_species_from_components(component_names, component_roles):
+    species_list = []
+    seen = set()
+    for name, role in zip(component_names, component_roles):
+        if role in ('solvent', 'neutral'):
+            if name not in seen:
+                species_list.append(name)
+                seen.add(name)
+        elif role == 'ion':
+            if name not in seen:
+                species_list.append(name)
+                seen.add(name)
+        elif role == 'salt':
+            cation, anion = _parse_salt_name(name)
+            if cation not in seen:
+                species_list.append(cation)
+                seen.add(cation)
+            if anion not in seen:
+                species_list.append(anion)
+                seen.add(anion)
+    return species_list
+
+def _resolve_species_for_params(species, user_params):
+    user_params = _normalize_user_params(user_params)
+    comp_names, comp_roles = _resolve_component_spec(species, user_params)
+    if comp_roles is not None and any(role == 'salt' for role in comp_roles):
+        derived = _derive_ionic_species_from_components(comp_names, comp_roles)
+        if species is None:
+            return derived
+        species_list = list(species)
+        if any(name in species_list for name, role in zip(comp_names, comp_roles) if role == 'salt'):
+            return derived
+        missing = [sp for sp in derived if sp not in species_list]
+        if missing:
+            raise InputError('species list is missing ions from salts: {}.'.format(', '.join(missing)))
+        return species_list
+    if species is not None:
+        return list(species)
+    for key in ('species', 'species_names'):
+        if key in user_params:
+            return list(user_params[key])
+    raise InputError('Composition input requires a species list or user_params[\"species\"].')
+
+def _resolve_params(species, t, user_params, params):
+    if params is not None:
+        return params
+    if species is None:
+        raise InputError("Either params or species must be provided.")
+    if t is None:
+        raise InputError("Temperature must be provided when building params from species.")
+    user_params = _normalize_user_params(user_params)
+    from data.epcsaft_properties import get_prop_dict
+    species_params = _resolve_species_for_params(species, user_params)
+    params = get_prop_dict(species_params, t, user_params=user_params)
+    if isinstance(user_params, dict):
+        for key in ('born_model', 'born_enabled', 'bjerrum_model', 'dielc_rule', 'dielc_ion'):
+            if key in user_params:
+                params[key] = user_params[key]
+    return params
+
+def _stoich_from_charges(z_cat, z_an):
+    zc = int(abs(z_cat))
+    za = int(abs(z_an))
+    if zc == 0 or za == 0:
+        raise InputError('salt ions must be charged.')
+    def _gcd(a, b):
+        while b:
+            a, b = b, a % b
+        return a
+    g = _gcd(zc, za)
+    return za // g, zc // g
+
+def _ionic_from_salt_name(salt_name, species_index, z):
+    cation, anion = _parse_salt_name(salt_name)
+    if cation not in species_index or anion not in species_index:
+        raise InputError('salt ions not found in species list: {}'.format(salt_name))
+    z_cat = z[species_index[cation]]
+    z_an = z[species_index[anion]]
+    nu_cat, nu_an = _stoich_from_charges(z_cat, z_an)
+    return [(cation, float(nu_cat)), (anion, float(nu_an))]
+
+def _salt_molality_to_ionic_x(x, params, species, user_params):
+    user_params = _normalize_user_params(user_params)
+    comp_names, comp_roles = _resolve_component_spec(species, user_params)
+    if comp_roles is None:
+        raise InputError('salt molality input requires component_roles.')
+    salts = [name for name, role in zip(comp_names, comp_roles) if role == 'salt']
+    solvents = [name for name, role in zip(comp_names, comp_roles) if role in ('solvent', 'neutral')]
+    if not salts or not solvents:
+        raise InputError('salt molality input requires salt and solvent components.')
+    if len(solvents) != 1:
+        raise InputError('salt molality input supports a single solvent component.')
+
+    if isinstance(x, dict):
+        molalities = np.asarray([x[salt] for salt in salts], dtype=float)
+    else:
+        molalities = np.asarray(x, dtype=float)
+    if molalities.ndim != 1 or len(molalities) != len(salts):
+        raise InputError('molality x must match number of salt components.')
+    if np.any(molalities < 0.0):
+        raise InputError('molalities must be non-negative.')
+
+    species_list = _resolve_species_for_params(species, user_params)
+    species_index = {name: i for i, name in enumerate(species_list)}
+    z = np.asarray(params.get('z', []), dtype=float)
+    if len(z) != len(species_list):
+        raise InputError('Parameter z must have the same length as species.')
+
+    n = np.zeros(len(species_list), dtype=float)
+    solvent_mass_kg = float(user_params.get('solvent_mass_kg', 1.0))
+    if solvent_mass_kg <= 0.0:
+        raise InputError('solvent_mass_kg must be positive.')
+
+    solvent_name = solvents[0]
+    idx_solvent = species_index[solvent_name]
+    mw_solvent = float(params['MW'][idx_solvent])
+    n[idx_solvent] += solvent_mass_kg / mw_solvent
+
+    for salt, m in zip(salts, molalities):
+        ions = _ionic_from_salt_name(salt, species_index, z)
+        n_salt = float(m) * solvent_mass_kg
+        for ion_name, nu in ions:
+            idx = species_index[ion_name]
+            n[idx] += float(nu) * n_salt
+
+    total = np.sum(n)
+    if total <= 0.0:
+        raise InputError('salt molality input produced zero total moles.')
+    return n / total
+
+def _resolve_x_input(x, params, species, user_params):
+    user_params = _normalize_user_params(user_params)
+    comp_basis = str(user_params.get('composition_basis', 'ionic')).lower()
+    x_basis = str(user_params.get('x_basis', 'mole_frac')).lower()
+    if comp_basis in ('salt', 'salt_basis') and x_basis in ('molality', 'salt_molality'):
+        return _salt_molality_to_ionic_x(x, params, species, user_params)
+    if x_basis in ('mole_frac', 'mole_fraction'):
+        if isinstance(x, dict):
+            comp_names, _ = _resolve_component_spec(species, user_params)
+            if comp_names is None:
+                raise InputError('mole fraction dict input requires component_names.')
+            return np.asarray([x[name] for name in comp_names], dtype=float)
+        return np.asarray(x, dtype=float)
+    raise InputError('Unsupported composition basis or x basis: {}, {}'.format(comp_basis, x_basis))
+
+def pcsaft_salt_molality_to_ionic_x(t, x, params=None, species=None, user_params=None):
+    params = _resolve_params(species, t, user_params, params)
+    return _salt_molality_to_ionic_x(x, params, species, user_params)
+
+def pcsaft_miac(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, input='p', eps=1e-12, species=None, user_params=None):
+    user_params = _normalize_user_params(user_params)
+    params = _resolve_params(species, t, user_params, params)
+    x_ionic = _resolve_x_input(x, params, species, user_params)
+    gamma = pcsaft_actcoeff(t, p_or_rho, x_ionic, params, phase=phase, input=input, eps=eps)
+    ln_gamma = np.log(np.asarray(gamma, dtype=float))
+
+    comp_names, comp_roles = _resolve_component_spec(species, user_params)
+    if comp_roles is None:
+        raise InputError('pcsaft_miac requires component_roles with salt components.')
+    salts = [name for name, role in zip(comp_names, comp_roles) if role == 'salt']
+    if not salts:
+        raise InputError('pcsaft_miac requires at least one salt component.')
+
+    species_list = _resolve_species_for_params(species, user_params)
+    species_index = {name: i for i, name in enumerate(species_list)}
+    z = np.asarray(params.get('z', []), dtype=float)
+    if len(z) != len(species_list):
+        raise InputError('Parameter z must have the same length as species.')
+
+    result = {}
+    for salt in salts:
+        ions = _ionic_from_salt_name(salt, species_index, z)
+        total = 0.0
+        accum = 0.0
+        for ion_name, nu in ions:
+            idx = species_index[ion_name]
+            weight = float(nu)
+            total += weight
+            accum += weight * ln_gamma[idx]
+        if total == 0.0:
+            raise InputError('Invalid stoichiometry for salt: {}'.format(salt))
+        result[salt] = float(np.exp(accum / total))
+    return result
+
+def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, input='p', eps=1e-12, species=None, user_params=None):
+    user_params = _normalize_user_params(user_params)
+    params = _resolve_params(species, t, user_params, params)
+    comp_names, comp_roles = _resolve_component_spec(species, user_params)
+    if comp_roles is None:
+        raise InputError('pcsaft_miac_m requires component_roles with salt components.')
+    salts = [name for name, role in zip(comp_names, comp_roles) if role == 'salt']
+    solvents = [name for name, role in zip(comp_names, comp_roles) if role in ('solvent', 'neutral')]
+    if not salts or not solvents:
+        raise InputError('pcsaft_miac_m requires salt and solvent components.')
+    if len(solvents) != 1:
+        raise InputError('pcsaft_miac_m supports a single solvent component.')
+
+    if isinstance(x, dict):
+        molalities = np.asarray([x[salt] for salt in salts], dtype=float)
+    else:
+        molalities = np.asarray(x, dtype=float)
+    if molalities.ndim != 1 or len(molalities) != len(salts):
+        raise InputError('pcsaft_miac_m molality array must match salt components.')
+
+    gamma_pm_x = pcsaft_miac(t, p_or_rho, x, params=params, phase=phase, dielc_rule=dielc_rule,
+                             input=input, eps=eps, species=species, user_params=user_params)
+
+    species_list = _resolve_species_for_params(species, user_params)
+    species_index = {name: i for i, name in enumerate(species_list)}
+    z = np.asarray(params.get('z', []), dtype=float)
+    if len(z) != len(species_list):
+        raise InputError('Parameter z must have the same length as species.')
+
+    idx_solvent = species_index[solvents[0]]
+    mw_solvent = float(params['MW'][idx_solvent])
+
+    result = {}
+    for salt, m in zip(salts, molalities):
+        ions = _ionic_from_salt_name(salt, species_index, z)
+        sum_nu = sum(float(nu) for _, nu in ions)
+        denom = 1.0 + mw_solvent * float(m) * sum_nu
+        result[salt] = float(gamma_pm_x[salt]) / denom
+    return result

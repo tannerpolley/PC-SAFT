@@ -29,6 +29,10 @@ struct add_args {
     vector<double> d_born;
     vector<double> f_solv;
     int born_model;
+    int born_enabled;
+    int dielc_rule;
+    int bjerrum_model;
+    double dielc_ion;
     vector<int> assoc_num;
     vector<int> assoc_matrix;
     vector<double> k_hb;
@@ -45,6 +49,9 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
 double pcsaft_hres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_sres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_gres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_lnfugcoef_inf_dil_cpp(double t, double p, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_gsolv_cpp(double t, double p, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_gtransfer_cpp(double t, double p, vector<double> x1, add_args &cppargs1, vector<double> x2, add_args &cppargs2);
 
 vector<double> flashTQ_cpp(double t, double Q, vector<double> x, add_args &cppargs);
 vector<double> flashTQ_cpp(double t, double Q, vector<double> x, add_args &cppargs, double p_guess); // used if a guess value is given
