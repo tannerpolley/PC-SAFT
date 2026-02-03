@@ -1261,6 +1261,135 @@ def pcsaft_ares(t, p_or_rho, x, params, phase='liq', input='p'):
     except Exception as exc:
         _raise_solution_error('pcsaft_ares', exc)
 
+def pcsaft_ares_contrib(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Residual Helmholtz energy contributions.
+
+    Returns: [ares_total, ares_hc, ares_disp, ares_assoc, ares_ion, ares_born, ares_polar]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_ares_contrib_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_ares_contrib', exc)
+
+def pcsaft_Z_contrib(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Compressibility factor contributions.
+
+    Returns: [Z, Zid, Zhc, Zdisp, Zpolar, Zassoc, Zion]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_Z_contrib_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_Z_contrib', exc)
+
+def pcsaft_mu_res_contrib(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Residual chemical potential contributions and ln(Z).
+
+    Returns a flat vector:
+      [lnZ,
+       mu_res (n),
+       mu_hc (n),
+       mu_disp (n),
+       mu_assoc (n),
+       mu_ion (n),
+       mu_born (n),
+       mu_polar (n)]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_mu_res_contrib_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_mu_res_contrib', exc)
+
+def pcsaft_ion_dh_debug(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Debye-Huckel diagnostics for electrolytes.
+
+    Returns: [dielc, kappa, sum_z2, alpha(n), chi(n), sigma_k(n)]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_ion_dh_debug_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_ion_dh_debug', exc)
+
+def pcsaft_lnfug_debug(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Debug helper for fugacity coefficients.
+
+    Returns: [lnZ, mu_res_from_lnfug (n), lnfugcoef (n)]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_lnfug_debug_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_lnfug_debug', exc)
+
+def pcsaft_lnfug_terms(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Debug helper to expose lnfug path per-term mu contributions.
+
+    Returns a flat vector:
+      [lnZ,
+       mu_res (n),
+       mu_hc (n),
+       mu_disp (n),
+       mu_assoc (n),
+       mu_ion (n),
+       mu_born (n),
+       mu_polar (n),
+       lnfugcoef (n)]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_lnfug_terms_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_lnfug_terms', exc)
+
+def pcsaft_dielc_debug(t, p_or_rho, x, params, phase='liq', input='p'):
+    """
+    Debug helper for dielectric mixing.
+
+    Returns: [eps_mix, deps_dx (n)]
+    """
+    x, params = ensure_numpy_input(x, params)
+    params = check_association(params)
+    validate_params(x, params)
+    cppargs = create_struct(params)
+    try:
+        rho = _resolve_rho(t, p_or_rho, x, params, phase=phase, input=input)
+        return np.asarray(pcsaft_dielc_debug_cpp(t, rho, x, cppargs))
+    except Exception as exc:
+        _raise_solution_error('pcsaft_dielc_debug', exc)
+
 
 def pcsaft_dadt(t, p_or_rho, x, params, phase='liq', input='p'):
     """
@@ -1500,7 +1629,7 @@ def create_struct(params):
     cppargs.born_model = 1
     cppargs.born_enabled = 1
     cppargs.bjerrum_model = 0
-    cppargs.dielc_rule = 1
+    cppargs.dielc_rule = -1
     cppargs.dielc_ion = 0.0
 
     cppargs.m = np_to_vector_double(params['m'])
@@ -1771,7 +1900,7 @@ def pcsaft_miac(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, input
         result[salt] = float(np.exp(accum / total))
     return result
 
-def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, input='p', eps=1e-12, species=None, user_params=None):
+def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, input='p', eps=1e-12, species=None, user_params=None, debug=False):
     user_params = _normalize_user_params(user_params)
     params = _resolve_params(species, t, user_params, params)
     comp_names, comp_roles = _resolve_component_spec(species, user_params)
@@ -1791,6 +1920,8 @@ def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, inp
     if molalities.ndim != 1 or len(molalities) != len(salts):
         raise InputError('pcsaft_miac_m molality array must match salt components.')
 
+    x_ionic = _resolve_x_input(x, params, species, user_params) if debug else None
+
     gamma_pm_x = pcsaft_miac(t, p_or_rho, x, params=params, phase=phase, dielc_rule=dielc_rule,
                              input=input, eps=eps, species=species, user_params=user_params)
 
@@ -1809,4 +1940,15 @@ def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, inp
         sum_nu = sum(float(nu) for _, nu in ions)
         denom = 1.0 + mw_solvent * float(m) * sum_nu
         result[salt] = float(gamma_pm_x[salt]) / denom
+    if debug:
+        debug_info = {
+            "x_ionic": x_ionic,
+            "ares_contrib": pcsaft_ares_contrib(t, p_or_rho, x_ionic, params, phase=phase, input=input),
+            "mu_res_contrib": pcsaft_mu_res_contrib(t, p_or_rho, x_ionic, params, phase=phase, input=input),
+            "Z_contrib": pcsaft_Z_contrib(t, p_or_rho, x_ionic, params, phase=phase, input=input),
+            "lnfugcoef": pcsaft_lnfugcoef(t, p_or_rho, x_ionic, params, phase=phase, input=input),
+            "lnfugcoef_inf_dil": pcsaft_lnfugcoef_inf_dil(t, p_or_rho, x_ionic, params, phase=phase, input=input, eps=eps),
+            "ion_dh_debug": pcsaft_ion_dh_debug(t, p_or_rho, x_ionic, params, phase=phase, input=input),
+        }
+        return result, debug_info
     return result

@@ -12,6 +12,9 @@ cdef extern from "pcsaft_electrolyte.cpp":
     double pcsaft_Z_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
     vector[double] pcsaft_Z_contrib_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
     vector[double] pcsaft_ion_dh_debug_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
+    vector[double] pcsaft_lnfug_debug_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
+    vector[double] pcsaft_lnfug_terms_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
+    vector[double] pcsaft_dielc_debug_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
     vector[double] pcsaft_lnfug_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
     vector[double] pcsaft_mu_res_contrib_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
     vector[double] pcsaft_fugcoef_cpp(double t, double rho, vector[double] x, add_args &cppargs) except +
