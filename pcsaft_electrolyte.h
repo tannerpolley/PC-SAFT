@@ -33,6 +33,7 @@ struct add_args {
     int dielc_rule;
     int bjerrum_model;
     double dielc_ion;
+    int born_epsdx_off;
     vector<int> assoc_num;
     vector<int> assoc_matrix;
     vector<double> k_hb;

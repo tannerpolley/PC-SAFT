@@ -205,19 +205,28 @@ vector<double> dielc_mix_dx(vector<double> x, add_args &cppargs) {
                 } else {
                     deps_dx[n] = cppargs.dielc[n];
                 }
-            } else if (rule == 4) {
-                double denom = 1.0 + 7.01 * x_ion;
-                if (is_solvent[n]) {
-                    deps_dx[n] = d_eps_solv_mix_sf / denom;
-                } else {
-                    deps_dx[n] = eps_solv_mix_sf * (-7.01) / (denom * denom);
+            } else if (rule == 4 || rule == 6) {
+                // Unconstrained central finite difference for deps/dx (captures x_ion coupling)
+                const double h = 1e-6;
+                double eps_base = eps_solv_mix_sf / (1.0 + 7.01 * x_ion);
+                vector<double> x_fd_plus = x;
+                vector<double> x_fd_minus = x;
+                x_fd_plus[n] += h;
+                x_fd_minus[n] -= h;
+                // guard against negatives
+                if (x_fd_minus[n] < 0.0) {
+                    x_fd_minus[n] = 0.0;
                 }
-            } else {
-                double denom = 1.0 + 7.01 * x_ion;
-                if (is_solvent[n]) {
-                    deps_dx[n] = d_eps_solv_mix_sf / denom;
-                } else {
-                    deps_dx[n] = 0.0;
+                double eps_plus = dielc_mix(x_fd_plus, cppargs);
+                double eps_minus = dielc_mix(x_fd_minus, cppargs);
+                deps_dx[n] = (eps_plus - eps_minus) / (x_fd_plus[n] - x_fd_minus[n]);
+                // fallback to forward diff if denominator collapses
+                if (!std::isfinite(deps_dx[n])) {
+                    double h_fwd = 1e-7;
+                    x_fd_plus = x;
+                    x_fd_plus[n] += h_fwd;
+                    eps_plus = dielc_mix(x_fd_plus, cppargs);
+                    deps_dx[n] = (eps_plus - eps_base) / h_fwd;
                 }
             }
         }
@@ -507,6 +516,10 @@ static double f_mix_value(const vector<double> &x, const add_args &cppargs) {
 
 static double ares_born_legacy(double t, const vector<double> &x, const MixState &ms, double dielc, const add_args &cppargs) {
     if (cppargs.z.empty()) {
+        return 0.0;
+    }
+    if (cppargs.born_epsdx_off == 1) {
+        // Shortcut: skip Born contribution entirely
         return 0.0;
     }
     const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
@@ -1543,18 +1556,19 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
         double dielc = dielc_mix(x, cppargs);
         IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
         if (dh.kappa != 0.0) {
-            double summ1 = 0.0;
-            double summ2 = 0.0;
+            // Paper Eq. (21) layout, numerically identical to original expression
+            const double C_DH = 1.0 / (24.0 * PI * kb * t * perm_vac); // e^2 carried inside q2
+            double sum_q2_sigma = 0.0;
+            double sum_q2 = 0.0;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ1 += dh.alpha[i] * x[i] * q * q * dh.sigma_k[i];
-                summ2 += dh.alpha[i] * x[i] * q * q;
+                double q2 = cppargs.z[i] * cppargs.z[i] * E_CHRG * E_CHRG;
+                sum_q2_sigma += dh.alpha[i] * x[i] * q2 * dh.sigma_k[i];
+                sum_q2 += dh.alpha[i] * x[i] * q2;
             }
-
+            double sigma_bar = (sum_q2 > 0.0) ? (sum_q2_sigma / sum_q2) : 0.0;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                mu_ion[i] = -q * q * dh.kappa / 24. / PI / kb / t / (dielc * perm_vac) *
-                    (2 * dh.chi[i] + summ1 / summ2);
+                double q2 = cppargs.z[i] * cppargs.z[i] * E_CHRG * E_CHRG;
+                mu_ion[i] = -C_DH * (dh.kappa / dielc) * q2 * (2.0 * dh.chi[i] + sigma_bar);
             }
         }
     }
@@ -1563,7 +1577,23 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     vector<double> mu_born(ncomp, 0);
     if (cppargs.born_enabled && !cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        vector<double> dielc_dx = dielc_mix_dx(x, cppargs);
+        vector<double> dielc_dx;
+        if (cppargs.dielc_rule == 4 || cppargs.dielc_rule == 6) {
+            dielc_dx.assign(ncomp, 0.0);
+            const double h = 1e-6;
+            for (int k = 0; k < ncomp; k++) {
+                vector<double> xp = x;
+                vector<double> xm = x;
+                xp[k] += h;
+                xm[k] = std::max(0.0, xm[k] - h);
+                double ep = dielc_mix(xp, cppargs);
+                double em = dielc_mix(xm, cppargs);
+                double denom = xp[k] - xm[k];
+                dielc_dx[k] = (denom != 0.0) ? ((ep - em) / denom) : 0.0;
+            }
+        } else {
+            dielc_dx = dielc_mix_dx(x, cppargs);
+        }
         const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
         const double dielc_ion = get_dielc_ion(cppargs);
         const double factor_ion = (1.0 - 1.0 / dielc_ion);
@@ -1628,10 +1658,25 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             for (int k = 0; k < ncomp; k++) {
                 double term_ion = 0.0;
                 if (std::fabs(cppargs.z[k]) > 1e-12 && d_eff[k] > 0.0 && a_i[k] > 0.0) {
-                    term_ion = factor * cppargs.z[k] * cppargs.z[k] / d_eff[k] +
-                        factor_ion * cppargs.z[k] * cppargs.z[k] * (1.0 / a_i[k] - 1.0 / d_eff[k]);
+                    double f_min = f_mix_value(x, cppargs);
+                    double df_min_dxk = 0.0;
+                    if (!cppargs.f_solv.empty() && k < static_cast<int>(cppargs.f_solv.size())) {
+                        df_min_dxk = cppargs.f_solv[k];
+                    }
+                    double delta_d = (f_min - 1.0) / std::fabs(cppargs.z[k]) * a_i[k];
+                    double dd_eff_dxk = df_min_dxk / std::fabs(cppargs.z[k]) * a_i[k];
+                    double inv_deff = 1.0 / d_eff[k];
+                    double inv_dborn = 1.0 / a_i[k];
+                    double dinv_deff_dxk = -dd_eff_dxk * inv_deff * inv_deff;
+
+                    term_ion = factor * cppargs.z[k] * cppargs.z[k] * (inv_deff + dinv_deff_dxk * x[k]) +
+                        factor_ion * cppargs.z[k] * cppargs.z[k] *
+                        (inv_dborn - inv_deff + x[k] * (-dinv_deff_dxk));
                 }
-                double term_eps = (dielc_dx[k] / (dielc * dielc)) * S1;
+                double term_eps = 0.0;
+                if (cppargs.born_epsdx_off != 1) {
+                    term_eps = (dielc_dx[k] / (dielc * dielc)) * S1;
+                }
                 daborn_dx[k] = -C0 / t * (term_ion + term_eps);
             }
 
@@ -2003,7 +2048,23 @@ vector<double> pcsaft_lnfug_terms_cpp(double t, double rho, vector<double> x, ad
     vector<double> mu_born(ncomp, 0);
     if (cppargs.born_enabled && !cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        vector<double> dielc_dx = dielc_mix_dx(x, cppargs);
+        vector<double> dielc_dx;
+        if (cppargs.dielc_rule == 4 || cppargs.dielc_rule == 6) {
+            dielc_dx.assign(ncomp, 0.0);
+            const double h = 1e-6;
+            for (int k = 0; k < ncomp; k++) {
+                vector<double> xp = x;
+                vector<double> xm = x;
+                xp[k] += h;
+                xm[k] = std::max(0.0, xm[k] - h);
+                double ep = dielc_mix(xp, cppargs);
+                double em = dielc_mix(xm, cppargs);
+                double denom = xp[k] - xm[k];
+                dielc_dx[k] = (denom != 0.0) ? ((ep - em) / denom) : 0.0;
+            }
+        } else {
+            dielc_dx = dielc_mix_dx(x, cppargs);
+        }
         const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
         const double dielc_ion = get_dielc_ion(cppargs);
         const double factor_ion = (1.0 - 1.0 / dielc_ion);
@@ -2497,7 +2558,23 @@ vector<double> pcsaft_mu_res_contrib_cpp(double t, double rho, vector<double> x,
     vector<double> mu_born(ncomp, 0);
     if (cppargs.born_enabled && !cppargs.z.empty()) {
         double dielc = dielc_mix(x, cppargs);
-        vector<double> dielc_dx = dielc_mix_dx(x, cppargs);
+        vector<double> dielc_dx;
+        if (cppargs.dielc_rule == 4 || cppargs.dielc_rule == 6) {
+            dielc_dx.assign(ncomp, 0.0);
+            const double h = 1e-6;
+            for (int k = 0; k < ncomp; k++) {
+                vector<double> xp = x;
+                vector<double> xm = x;
+                xp[k] += h;
+                xm[k] = std::max(0.0, xm[k] - h);
+                double ep = dielc_mix(xp, cppargs);
+                double em = dielc_mix(xm, cppargs);
+                double denom = xp[k] - xm[k];
+                dielc_dx[k] = (denom != 0.0) ? ((ep - em) / denom) : 0.0;
+            }
+        } else {
+            dielc_dx = dielc_mix_dx(x, cppargs);
+        }
         const double C0 = pow(E_CHRG, 2) / (4. * PI * kb * perm_vac);
         const double dielc_ion = get_dielc_ion(cppargs);
         const double factor_ion = (1.0 - 1.0 / dielc_ion);
@@ -2780,12 +2857,14 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
         double dielc = dielc_mix(x, cppargs);
         IonDH dh = build_ion_dh(t, ms, x, cppargs, dielc);
         if (dh.kappa != 0.0) {
-            summ = 0.0;
+            // Paper Eq. (20) layout, numerically identical to original expression
+            const double C_DH = 1.0 / (12.0 * PI * kb * t * perm_vac); // e^2 carried inside q2
+            double Q = 0.0;
             for (int i = 0; i < ncomp; i++) {
-                double q = cppargs.z[i] * E_CHRG;
-                summ += dh.alpha[i] * x[i] * q * q * dh.chi[i];
+                double q2 = cppargs.z[i] * cppargs.z[i] * E_CHRG * E_CHRG;
+                Q += dh.alpha[i] * x[i] * q2 * dh.chi[i];
             }
-            ares_ion = -1 / 12. / PI / kb / t / (dielc * perm_vac) * dh.kappa * summ;
+            ares_ion = -C_DH * (dh.kappa / dielc) * Q;
         }
     }
 

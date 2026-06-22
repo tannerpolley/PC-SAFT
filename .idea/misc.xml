@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="PC-SAFT" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="PC-SAFT" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="PC-SAFT-Polley" project-jdk-type="Python SDK" />
 </project>

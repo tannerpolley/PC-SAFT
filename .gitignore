@@ -8,3 +8,4 @@ tests/__pycache__
 *.so
 Makefile
 make.bat
+.chatgpt/

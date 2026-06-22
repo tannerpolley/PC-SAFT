@@ -1631,6 +1631,8 @@ def create_struct(params):
     cppargs.bjerrum_model = 0
     cppargs.dielc_rule = -1
     cppargs.dielc_ion = 0.0
+    cppargs.born_epsdx_off = 0
+    cppargs.born_epsdx_off = 0
 
     cppargs.m = np_to_vector_double(params['m'])
     cppargs.s = np_to_vector_double(params['s'])
@@ -1663,6 +1665,10 @@ def create_struct(params):
         cppargs.bjerrum_model = <int>params['bjerrum_model']
     if 'dielc_ion' in params:
         cppargs.dielc_ion = <double>params['dielc_ion']
+    if 'born_epsdx_off' in params:
+        cppargs.born_epsdx_off = <int>params['born_epsdx_off']
+    if 'born_epsdx_off' in params:
+        cppargs.born_epsdx_off = <int>params['born_epsdx_off']
     if 'assoc_num' in params:
         cppargs.assoc_num = np_to_vector_int(params['assoc_num'])
     if 'assoc_matrix' in params:
@@ -1761,6 +1767,10 @@ def _resolve_species_for_params(species, user_params):
 
 def _resolve_params(species, t, user_params, params):
     if params is not None:
+        if 'born_epsdx_off' not in params:
+            params = deepcopy(params)
+            dr = params.get('dielc_rule', user_params.get('dielc_rule') if isinstance(user_params, dict) else None)
+            params['born_epsdx_off'] = 1 if dr in (4, 6) else 0
         return params
     if species is None:
         raise InputError("Either params or species must be provided.")
@@ -1771,9 +1781,12 @@ def _resolve_params(species, t, user_params, params):
     species_params = _resolve_species_for_params(species, user_params)
     params = get_prop_dict(species_params, t, user_params=user_params)
     if isinstance(user_params, dict):
-        for key in ('born_model', 'born_enabled', 'bjerrum_model', 'dielc_rule', 'dielc_ion'):
+        for key in ('born_model', 'born_enabled', 'bjerrum_model', 'dielc_rule', 'dielc_ion', 'born_epsdx_off'):
             if key in user_params:
                 params[key] = user_params[key]
+    if 'born_epsdx_off' not in params:
+        dr = params.get('dielc_rule', user_params.get('dielc_rule') if isinstance(user_params, dict) else None)
+        params['born_epsdx_off'] = 1 if dr in (4, 6) else 0
     return params
 
 def _stoich_from_charges(z_cat, z_an):
@@ -1952,3 +1965,4 @@ def pcsaft_miac_m(t, p_or_rho, x, params=None, phase='liq', dielc_rule=None, inp
         }
         return result, debug_info
     return result
+

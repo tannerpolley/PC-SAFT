@@ -47,6 +47,44 @@ Example
   lnphi = pcsaft_lnfugcoef(t, p, x, pyargs)
   print('ln(phi) of toluene at {} K: {}'.format(t, lnphi[0]))
 
+  # Using default component library with species list
+  species = ['Methanol', 'Li+']
+  x = np.asarray([0.95, 0.05])
+  t = 298.15
+  p = 101325
+  lnphi = pcsaft_lnfugcoef(t, p, x, species=species, phase='liq')
+  print('ln(phi) with species list: {}'.format(lnphi))
+
+  # Using custom component params (user_params)
+  user_params = {
+      'MySolvent': {
+          'MW': 0.050,
+          'm': 2.5,
+          's': 3.2,
+          'e': 200.0,
+          'e_assoc': 0.0,
+          'vol_a': 0.0,
+          'assoc_scheme': None,
+          'dipm': 0.0,
+          'dip_num': 1,
+          'z': 0.0,
+          'dielc': 30.0,
+      }
+  }
+  species = ['MySolvent']
+  x = np.asarray([1.0])
+  lnphi = pcsaft_lnfugcoef(t, p, x, species=species, user_params=user_params)
+  print('ln(phi) with custom component: {}'.format(lnphi[0]))
+
+  # Validate species and required keys before running
+  from pcsaft import validate_species_params
+  report = validate_species_params(species, user_params=user_params)
+  print(report)
+
+  # Select dielectric mixing rule (1=x, 2=w, 3=combined, 4=new)
+  params = {'dielc_rule': 4}
+  lnphi = pcsaft_lnfugcoef(t, p, x, species=species, user_params=user_params, params=params)
+
   # Water using default 2B association scheme
   x = np.asarray([1.])
   m = np.asarray([1.2047])
