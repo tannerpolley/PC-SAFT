@@ -10,7 +10,9 @@ PACKAGE_ROOT = "src/pcsaft"
 
 extra_compile_args = []
 if os.name == "nt":
-    extra_compile_args.append("/wd4551")
+    extra_compile_args.extend(["/std:c++17", "/wd4551"])
+else:
+    extra_compile_args.append("-std=c++17")
 
 ext_modules = [
     Extension(
@@ -21,6 +23,7 @@ ext_modules = [
             np.get_include(),
             PACKAGE_ROOT,
             "externals/eigen",
+            "externals/autodiff",
         ],
         extra_compile_args=extra_compile_args,
     )
@@ -32,3 +35,4 @@ setup(
         language_level="3",
     )
 )
+

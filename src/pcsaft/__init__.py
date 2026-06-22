@@ -4,6 +4,7 @@ from .pcsaft import InputError
 from .pcsaft import SolutionError
 from .pcsaft import aly_lee
 from .pcsaft import dielc_water
+from .pcsaft import _pcsaft_autodiff_residual_derivatives
 from .pcsaft import flashPQ
 from .pcsaft import flashTQ
 from .pcsaft import pcsaft_Hvap

@@ -10,7 +10,7 @@ import pytest
 from pcsaft import pcsaft_den, pcsaft_hres, pcsaft_gres, pcsaft_sres
 from pcsaft import flashTQ, flashPQ, pcsaft_Hvap
 from pcsaft import dielc_water, pcsaft_osmoticC, pcsaft_fugcoef, pcsaft_miac_m, pcsaft_gsolv, pcsaft_lnfugcoef_terms, pcsaft_dielc_eval
-from pcsaft import pcsaft_cp, pcsaft_ares, pcsaft_dadt, pcsaft_p
+from pcsaft import pcsaft_cp, pcsaft_ares, pcsaft_dadt, pcsaft_p, _pcsaft_autodiff_residual_derivatives
 from pcsaft import pcsaft_multiphase_lle
 
 import json
@@ -69,6 +69,19 @@ def _runtime_to_elec_model(runtime):
 
 def _dataset_file(*parts: str) -> Path:
     return DATASET_ROOT.joinpath(*parts)
+
+
+def _central_dadt(t, rho, x, params, h=1.0):
+    return (pcsaft_ares(t + h, rho, x, params) - pcsaft_ares(t - h, rho, x, params)) / (2.0 * h)
+
+
+def _neutral_binary_params(dadt_mode='autodiff'):
+    return {
+        'm': np.asarray([2.4653, 2.8149]),
+        's': np.asarray([3.6478, 3.7169]),
+        'e': np.asarray([287.35, 285.69]),
+        'dadt_differential_mode': dadt_mode,
+    }
 
 
 def test_ares(print_result=False):
@@ -2044,6 +2057,34 @@ def test_mu_dh_analytical_numeric_close(dataset, species, x, t):
     assert np.allclose(mu_dh_analytical, mu_dh_numerical, rtol=0.0, atol=2e-5)
 
 
+@pytest.mark.parametrize(
+    "dataset,species,x,t",
+    [
+        ("2020_Bulow", ["Li+", "Br-", "Ethanol"], np.asarray([0.03, 0.03, 0.94]), 298.15),
+        ("2025_Figiel", ["Na+", "Cl-", "H2O-2B-Li"], np.asarray([0.02, 0.02, 0.96]), 298.15),
+    ],
+)
+def test_mu_dh_analytical_autodiff_close(dataset, species, x, t):
+    analytical = _load_dataset_params(
+        dataset,
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"DH_model": {"mu_DH_model": {"differential_mode": "analytical"}}}},
+    )
+    autodiff = _load_dataset_params(
+        dataset,
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"DH_model": {"mu_DH_model": {"differential_mode": "autodiff"}}}},
+    )
+    rho = pcsaft_den(t, 1.0e5, x, analytical, phase='liq')
+    mu_dh_analytical = np.asarray(pcsaft_lnfugcoef_terms(t, rho, x, analytical)["mu_ion"], dtype=float)
+    mu_dh_autodiff = np.asarray(pcsaft_lnfugcoef_terms(t, rho, x, autodiff)["mu_ion"], dtype=float)
+    assert np.allclose(mu_dh_analytical, mu_dh_autodiff, rtol=0.0, atol=5e-10)
+
+
 def test_mu_dh_toggle_changes_only_dh_branch():
     t = 298.15
     x = np.asarray([0.03, 0.03, 0.94])
@@ -2109,6 +2150,88 @@ def test_contribution_dadx_numeric_modes_are_available():
     ) > 1e-10
 
 
+def test_dielc_analytical_autodiff_close():
+    t = 298.15
+    x = np.asarray([0.03, 0.03, 0.94])
+    species = ["Li+", "Br-", "Ethanol"]
+    analytical = _load_dataset_params(
+        "2020_Bulow",
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"rel_perm": {"differential_mode": "analytical"}}},
+    )
+    autodiff = _load_dataset_params(
+        "2020_Bulow",
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"rel_perm": {"differential_mode": "autodiff"}}},
+    )
+    eps_analytical, deps_analytical = pcsaft_dielc_eval(x, analytical)
+    eps_autodiff, deps_autodiff = pcsaft_dielc_eval(x, autodiff)
+    assert eps_analytical == pytest.approx(eps_autodiff, rel=0.0, abs=1.0e-12)
+    assert np.allclose(np.asarray(deps_analytical, dtype=float), np.asarray(deps_autodiff, dtype=float), rtol=0.0, atol=5e-12)
+
+
+@pytest.mark.parametrize(
+    "dataset,species,x,t,baseline_mode,atol",
+    [
+        ("2020_Bulow", ["Li+", "Br-", "Ethanol"], np.asarray([0.03, 0.03, 0.94]), 298.15, "analytical", 5e-10),
+        ("2025_Figiel", ["Na+", "Cl-", "H2O-2B-Li"], np.asarray([0.02, 0.02, 0.96]), 298.15, "numerical", 5e-10),
+    ],
+)
+def test_mu_born_analytical_autodiff_close(dataset, species, x, t, baseline_mode, atol):
+    baseline = _load_dataset_params(
+        dataset,
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"born_model": {"mu_born_model": {"differential_mode": baseline_mode}}}},
+    )
+    autodiff = _load_dataset_params(
+        dataset,
+        species,
+        x,
+        t,
+        user_options={"elec_model": {"born_model": {"mu_born_model": {"differential_mode": "autodiff"}}}},
+    )
+    rho = pcsaft_den(t, 1.0e5, x, baseline, phase='liq')
+    mu_born_baseline = np.asarray(pcsaft_lnfugcoef_terms(t, rho, x, baseline)["mu_born"], dtype=float)
+    mu_born_autodiff = np.asarray(pcsaft_lnfugcoef_terms(t, rho, x, autodiff)["mu_born"], dtype=float)
+    assert np.allclose(mu_born_baseline, mu_born_autodiff, rtol=0.0, atol=atol)
+
+
+def test_contribution_dadx_autodiff_matches_analytical():
+    t = 298.15
+    x = np.asarray([0.03, 0.03, 0.94])
+    species = ["Li+", "Br-", "Ethanol"]
+    analytical = _load_dataset_params("2020_Bulow", species, x, t)
+    autodiff = _load_dataset_params(
+        "2020_Bulow",
+        species,
+        x,
+        t,
+        user_options={
+            "elec_model": {
+                "hc_model": {"dadx_differential_mode": "autodiff"},
+                "disp_model": {"dadx_differential_mode": "autodiff"},
+                "assoc_model": {"dadx_differential_mode": "autodiff"},
+                "polar_model": {"dadx_differential_mode": "autodiff"},
+            }
+        },
+    )
+    rho = pcsaft_den(t, 1.0e5, x, analytical, phase='liq')
+    terms_analytical = pcsaft_lnfugcoef_terms(t, rho, x, analytical)
+    terms_autodiff = pcsaft_lnfugcoef_terms(t, rho, x, autodiff)
+    for key in ("mu_hc", "mu_disp", "mu_assoc", "mu_polar"):
+        arr_a = np.asarray(terms_analytical[key], dtype=float)
+        arr_ad = np.asarray(terms_autodiff[key], dtype=float)
+        assert np.all(np.isfinite(arr_a))
+        assert np.all(np.isfinite(arr_ad))
+        assert np.allclose(arr_a, arr_ad, rtol=0.0, atol=5e-10)
+
+
 def test_2020_Bulow_ethanol_transfer_contribution_sum_matches_total():
     t = 298.15
     p = 1.0e5
@@ -2168,3 +2291,68 @@ def test_2020_Bulow_ethanol_transfer_contribution_sum_matches_total():
 
 
 
+
+
+@pytest.mark.parametrize(
+    "dataset,species,x,t,baseline_mode,atol",
+    [
+        ("2020_Bulow", ["Li+", "Br-", "Ethanol"], np.asarray([0.03, 0.03, 0.94]), 298.15, "analytical", 2e-6),
+        ("2025_Figiel", ["Na+", "Cl-", "H2O-2B-Li"], np.asarray([0.02, 0.02, 0.96]), 298.15, "numerical", 2e-6),
+    ],
+)
+def test_dadt_mode_selector_matches_expected_baseline(dataset, species, x, t, baseline_mode, atol):
+    baseline = _load_dataset_params(dataset, species, x, t, user_options={"dadt_differential_mode": baseline_mode})
+    numerical = _load_dataset_params(dataset, species, x, t, user_options={"dadt_differential_mode": "numerical"})
+    autodiff = _load_dataset_params(dataset, species, x, t, user_options={"dadt_differential_mode": "autodiff"})
+    rho = pcsaft_den(t, 1.0e5, x, baseline, phase='liq')
+    dadt_fd = _central_dadt(t, rho, x, baseline)
+    dadt_numerical = pcsaft_dadt(t, rho, x, numerical)
+    dadt_autodiff = pcsaft_dadt(t, rho, x, autodiff)
+    assert dadt_numerical == pytest.approx(dadt_fd, rel=0.0, abs=1e-12)
+    assert dadt_autodiff == pytest.approx(dadt_fd, rel=0.0, abs=atol)
+    if baseline_mode == "analytical":
+        dadt_baseline = pcsaft_dadt(t, rho, x, baseline)
+        assert abs((dadt_baseline - dadt_fd) / dadt_fd * 100) < 2e-2
+
+
+def test_invalid_dadt_differential_mode_raises():
+    x = np.asarray([1.0])
+    params = {
+        'm': np.asarray([2.8149]),
+        's': np.asarray([3.7169]),
+        'e': np.asarray([285.69]),
+        'dadt_differential_mode': 'bad-mode',
+    }
+    with pytest.raises(ValueError, match='dadt_differential_mode'):
+        pcsaft_dadt(330.0, 8000.0, x, params)
+
+
+@pytest.mark.parametrize(
+    "params_builder,x,t,p,phase,temp_h,x_h,rtol,atol",
+    [
+        (lambda: _neutral_binary_params('autodiff'), np.asarray([0.4, 0.6]), 330.0, 1.0e5, 'liq', 1.0, 1.0e-5, 2e-3, 2e-4),
+        (lambda: _load_dataset_params('2020_Bulow', ['Li+', 'Br-', 'Ethanol'], np.asarray([0.03, 0.03, 0.94]), 298.15, user_options={'dadt_differential_mode': 'autodiff'}), np.asarray([0.03, 0.03, 0.94]), 298.15, 1.0e5, 'liq', 1.0, 1.0e-5, 5e-3, 5e-4),
+    ],
+)
+def test_private_autodiff_second_derivatives_match_fd_of_first_derivatives(params_builder, x, t, p, phase, temp_h, x_h, rtol, atol):
+    params = params_builder()
+    rho = pcsaft_den(t, p, x, params, phase=phase)
+    derivs = _pcsaft_autodiff_residual_derivatives(t, rho, x, params)
+
+    d2adt2_fd = (pcsaft_dadt(t + temp_h, rho, x, params) - pcsaft_dadt(t - temp_h, rho, x, params)) / (2.0 * temp_h)
+    assert derivs['d2adt2'] == pytest.approx(d2adt2_fd, rel=rtol, abs=atol)
+
+    mixed_fd = np.zeros_like(x, dtype=float)
+    hess_fd = np.zeros((len(x), len(x)), dtype=float)
+    for j in range(len(x)):
+        xp = x.copy()
+        xm = x.copy()
+        xp[j] += x_h
+        xm[j] -= x_h
+        mixed_fd[j] = (_pcsaft_autodiff_residual_derivatives(t, rho, xp, params)['dadt'] - _pcsaft_autodiff_residual_derivatives(t, rho, xm, params)['dadt']) / (2.0 * x_h)
+        dadx_p = _pcsaft_autodiff_residual_derivatives(t, rho, xp, params)['dadx']
+        dadx_m = _pcsaft_autodiff_residual_derivatives(t, rho, xm, params)['dadx']
+        hess_fd[:, j] = (dadx_p - dadx_m) / (2.0 * x_h)
+
+    assert np.allclose(np.asarray(derivs['d2adtdx'], dtype=float), mixed_fd, rtol=rtol, atol=atol)
+    assert np.allclose(np.asarray(derivs['hessian_x'], dtype=float), hess_fd, rtol=rtol, atol=atol)

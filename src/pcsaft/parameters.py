@@ -299,6 +299,7 @@ _DIFF_MODE_ALIASES = {
     "analytical": 0,
     "numeric": 1,
     "numerical": 1,
+    "autodiff": 2,
 }
 _D_ION_MODE_ALIASES = {
     "t_indep": 0,
@@ -354,6 +355,7 @@ _CANONICAL_ELEC_MODEL = {
 }
 _DEFAULT_USER_OPTIONS = {
     "debug": False,
+    "dadt_differential_mode": "analytical",
     "solvated_ion_diameter_mixing_rule": False,
     "ion_dispersion_mixing_rule": True,
     "elec_model": copy.deepcopy(_CANONICAL_ELEC_MODEL),
@@ -1242,6 +1244,7 @@ def _resolve_runtime_options(user_options=None) -> dict:
         "eps_r_bulk",
         "DH_model",
         "debug",
+        "dadt_differential_mode",
     }
     unknown = set(user_options) - allowed
     if unknown:
@@ -1269,6 +1272,9 @@ def _resolve_runtime_options(user_options=None) -> dict:
     model = _normalize_elec_model(model)
     runtime = _flatten_model_to_runtime(model)
     runtime["debug"] = bool(user_options.get("debug", False))
+    runtime["dadt_differential_mode"] = int(_as_rule_number(user_options.get("dadt_differential_mode", "analytical"), _DIFF_MODE_ALIASES))
+    if runtime["dadt_differential_mode"] not in (0, 1, 2):
+        raise ValueError("dadt_differential_mode must be analytical/numerical/autodiff (0/1/2).")
     runtime["solvated_ion_diameter_mixing_rule"] = _coerce_bool(
         user_options.get("solvated_ion_diameter_mixing_rule", False)
     )
@@ -1775,4 +1781,6 @@ def get_prop_dict(dataset_name: str, species: Iterable[str], x, T: float, user_o
     prop_dic["solvated_ion_diameter_mixing_rule"] = bool(runtime["solvated_ion_diameter_mixing_rule"])
     prop_dic["ion_dispersion_mixing_rule"] = bool(runtime["ion_dispersion_mixing_rule"])
     prop_dic["debug"] = bool(runtime["debug"])
+    prop_dic["dadt_differential_mode"] = int(runtime["dadt_differential_mode"])
     return prop_dic
+

@@ -8,6 +8,7 @@
 #include "Eigen/Dense"
 
 #include "pcsaft_electrolyte.h"
+#include "pcsaft_autodiff_helpers.h"
 
 using std::vector;
 
@@ -484,6 +485,13 @@ vector<double> compute_born_dadx_fd(double t, const vector<double> &x, add_args 
     return dadx_born;
 }
 
+vector<double> compute_born_dadx_ad(double t, const vector<double> &x, add_args &cppargs) {
+    return pcsaft_autodiff::compute_gradient(x,
+        [&](const vector<pcsaft_autodiff::dual> &x_ad) -> pcsaft_autodiff::dual {
+            return pcsaft_autodiff::compute_born_ares_only(pcsaft_autodiff::dual(t), x_ad, cppargs);
+        },
+        "Non-finite Born autodiff derivative.");
+}
 double compute_dh_ares_only(double t, double rho, const vector<double> &x, add_args &cppargs) {
     if (cppargs.z.empty()) {
         return 0.0;
@@ -548,6 +556,13 @@ vector<double> compute_dh_dadx_fd(double t, double rho, const vector<double> &x,
     return dadx_dh;
 }
 
+vector<double> compute_dh_dadx_ad(double t, double rho, const vector<double> &x, add_args &cppargs) {
+    return pcsaft_autodiff::compute_gradient(x,
+        [&](const vector<pcsaft_autodiff::dual> &x_ad) -> pcsaft_autodiff::dual {
+            return pcsaft_autodiff::compute_dh_ares_only(pcsaft_autodiff::dual(t), rho, x_ad, cppargs);
+        },
+        "Non-finite DH autodiff derivative.");
+}
 double get_ares_contribution_value(const AresContributions &terms, AresContributionKind kind) {
     switch (kind) {
         case AresContributionKind::HC:
@@ -851,25 +866,44 @@ vector<double> compute_contribution_dadx_fd(AresContributionKind kind, double t,
     return dadx;
 }
 
+vector<double> compute_contribution_dadx_ad(AresContributionKind kind, double t, double rho, const vector<double> &x, add_args &cppargs) {
+    return pcsaft_autodiff::compute_gradient(x,
+        [&](const vector<pcsaft_autodiff::dual> &x_ad) -> pcsaft_autodiff::dual {
+            auto terms = pcsaft_autodiff::compute_contribution_terms(pcsaft_autodiff::dual(t), rho, x_ad, cppargs);
+            switch (kind) {
+                case AresContributionKind::HC:
+                    return terms.hc;
+                case AresContributionKind::DISP:
+                    return terms.disp;
+                case AresContributionKind::POLAR:
+                    return terms.polar;
+                case AresContributionKind::ASSOC:
+                    return terms.assoc;
+                default:
+                    throw ValueError("Autodiff contribution derivative is only implemented for HC, DISP, POLAR, and ASSOC.");
+            }
+        },
+        "Non-finite contribution autodiff derivative.");
+}
 void validate_dielc_inputs(const vector<double> &x, add_args &cppargs) {
     int ncomp = static_cast<int>(x.size());
     if (cppargs.dielc.size() != static_cast<size_t>(ncomp)) {
         throw ValueError("params['dielc'] must be an array with length equal to ncomp.");
     }
-    if (cppargs.dielc_diff_mode != 0 && cppargs.dielc_diff_mode != 1) {
-        throw ValueError("Unknown dielc_diff_mode. Supported values are 0 (analytic) and 1 (finite-diff).");
+    if (cppargs.dielc_diff_mode != 0 && cppargs.dielc_diff_mode != 1 && cppargs.dielc_diff_mode != 2) {
+        throw ValueError("Unknown dielc_diff_mode. Supported values are 0 (analytic), 1 (finite-diff), and 2 (autodiff).");
     }
-    if (cppargs.hc_dadx_diff_mode != 0 && cppargs.hc_dadx_diff_mode != 1) {
-        throw ValueError("Unknown hc_model dadx_differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.hc_dadx_diff_mode != 0 && cppargs.hc_dadx_diff_mode != 1 && cppargs.hc_dadx_diff_mode != 2) {
+        throw ValueError("Unknown hc_model dadx_differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
-    if (cppargs.disp_dadx_diff_mode != 0 && cppargs.disp_dadx_diff_mode != 1) {
-        throw ValueError("Unknown disp_model dadx_differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.disp_dadx_diff_mode != 0 && cppargs.disp_dadx_diff_mode != 1 && cppargs.disp_dadx_diff_mode != 2) {
+        throw ValueError("Unknown disp_model dadx_differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
-    if (cppargs.assoc_dadx_diff_mode != 0 && cppargs.assoc_dadx_diff_mode != 1) {
-        throw ValueError("Unknown assoc_model dadx_differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.assoc_dadx_diff_mode != 0 && cppargs.assoc_dadx_diff_mode != 1 && cppargs.assoc_dadx_diff_mode != 2) {
+        throw ValueError("Unknown assoc_model dadx_differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
-    if (cppargs.polar_dadx_diff_mode != 0 && cppargs.polar_dadx_diff_mode != 1) {
-        throw ValueError("Unknown polar_model dadx_differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.polar_dadx_diff_mode != 0 && cppargs.polar_dadx_diff_mode != 1 && cppargs.polar_dadx_diff_mode != 2) {
+        throw ValueError("Unknown polar_model dadx_differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
     if (cppargs.born_diff_mode != 0 && cppargs.born_diff_mode != 1 && cppargs.born_diff_mode != 2 && cppargs.born_diff_mode != 3) {
         throw ValueError("Unknown born_diff_mode. Supported values are 0 (analytic), 1 (finite-diff), 2 (Eq.133-style), and 3 (no dielectric-concentration term).");
@@ -877,8 +911,8 @@ void validate_dielc_inputs(const vector<double> &x, add_args &cppargs) {
     if (cppargs.d_ion_mode < 0 || cppargs.d_ion_mode > 2) {
         throw ValueError("Unknown d_ion_mode. Supported values are 0, 1, 2.");
     }
-    if (cppargs.mu_DH_diff_mode != 0 && cppargs.mu_DH_diff_mode != 1) {
-        throw ValueError("Unknown mu_DH differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.mu_DH_diff_mode != 0 && cppargs.mu_DH_diff_mode != 1 && cppargs.mu_DH_diff_mode != 2) {
+        throw ValueError("Unknown mu_DH differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
     if (cppargs.mu_DH_comp_dep_rel_perm != 0 && cppargs.mu_DH_comp_dep_rel_perm != 1) {
         throw ValueError("mu_DH comp_dep_rel_perm must be 0 or 1.");
@@ -895,8 +929,8 @@ void validate_dielc_inputs(const vector<double> &x, add_args &cppargs) {
     if (cppargs.born_bulk_mode != 0 && cppargs.born_bulk_mode != 1) {
         throw ValueError("Unknown born bulk_mode. Supported values are mix/solvent (0/1).");
     }
-    if (cppargs.mu_born_diff_mode != 0 && cppargs.mu_born_diff_mode != 1) {
-        throw ValueError("Unknown mu_born differential_mode. Supported values are analytical/numerical (0/1).");
+    if (cppargs.mu_born_diff_mode != 0 && cppargs.mu_born_diff_mode != 1 && cppargs.mu_born_diff_mode != 2) {
+        throw ValueError("Unknown mu_born differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
     }
     if (cppargs.born_eps_mode != 0 && cppargs.born_eps_mode != 1) {
         throw ValueError("Unknown born_eps_mode. Supported values are 0 (eps_r,mix) and 1 (eps_r,solvent).");
@@ -1245,12 +1279,22 @@ vector<double> compute_deps_rule_fd(int rule, const vector<double> &x, add_args 
     return deps_dx;
 }
 
+vector<double> compute_deps_rule_ad(int rule, const vector<double> &x, add_args &cppargs) {
+    return pcsaft_autodiff::compute_gradient(x,
+        [&](const vector<pcsaft_autodiff::dual> &x_ad) -> pcsaft_autodiff::dual {
+            return pcsaft_autodiff::compute_eps_rule(rule, x_ad, cppargs);
+        },
+        "Non-finite dielectric autodiff derivative.");
+}
 DielcState evaluate_dielc_state(const vector<double> &x, add_args &cppargs) {
     validate_dielc_inputs(x, cppargs);
     DielcState state;
     state.eps = compute_eps_rule(cppargs.dielc_rule, x, cppargs);
     if (cppargs.dielc_diff_mode == 0 && cppargs.dielc_rule != 8) {
         state.deps_dx = compute_deps_rule_analytic(cppargs.dielc_rule, x, cppargs);
+    }
+    else if (cppargs.dielc_diff_mode == 2) {
+        state.deps_dx = compute_deps_rule_ad(cppargs.dielc_rule, x, cppargs);
     }
     else {
         state.deps_dx = compute_deps_rule_fd(cppargs.dielc_rule, x, cppargs);
@@ -1893,8 +1937,14 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
     if (cppargs.hc_dadx_diff_mode == 1) {
         dahc_dx = compute_contribution_dadx_fd(AresContributionKind::HC, t, rho, x, cppargs, ares_hc);
     }
+    else if (cppargs.hc_dadx_diff_mode == 2) {
+        dahc_dx = compute_contribution_dadx_ad(AresContributionKind::HC, t, rho, x, cppargs);
+    }
     if (cppargs.disp_dadx_diff_mode == 1) {
         dadisp_dx = compute_contribution_dadx_fd(AresContributionKind::DISP, t, rho, x, cppargs, ares_disp);
+    }
+    else if (cppargs.disp_dadx_diff_mode == 2) {
+        dadisp_dx = compute_contribution_dadx_ad(AresContributionKind::DISP, t, rho, x, cppargs);
     }
 
     vector<double> mu_hc(ncomp, 0);
@@ -2043,6 +2093,9 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             if (cppargs.polar_dadx_diff_mode == 1) {
                 dapolar_dx = compute_contribution_dadx_fd(AresContributionKind::POLAR, t, rho, x, cppargs, ares_polar);
             }
+            else if (cppargs.polar_dadx_diff_mode == 2) {
+                dapolar_dx = compute_contribution_dadx_ad(AresContributionKind::POLAR, t, rho, x, cppargs);
+            }
             for (int i = 0; i < ncomp; i++) {
                 sum_x_dapolar_dx += x[i]*dapolar_dx[i];
             }
@@ -2173,6 +2226,9 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
         if (cppargs.assoc_dadx_diff_mode == 1) {
             daassoc_dx = compute_contribution_dadx_fd(AresContributionKind::ASSOC, t, rho, x, cppargs, ares_assoc);
         }
+        else if (cppargs.assoc_dadx_diff_mode == 2) {
+            daassoc_dx = compute_contribution_dadx_ad(AresContributionKind::ASSOC, t, rho, x, cppargs);
+        }
         for (int i = 0; i < ncomp; i++) {
             sum_x_daassoc_dx += x[i]*daassoc_dx[i];
         }
@@ -2246,6 +2302,9 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             if (cppargs.mu_DH_diff_mode == 1) {
                 dadx = compute_dh_dadx_fd(t, rho, x, cppargs, a_DH);
             }
+            else if (cppargs.mu_DH_diff_mode == 2) {
+                dadx = compute_dh_dadx_ad(t, rho, x, cppargs);
+            }
             else {
                 double Aconst = den*E_CHRG*E_CHRG/(kb*t*perm_vac);
                 for (int i = 0; i < ncomp; i++) {
@@ -2277,7 +2336,7 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             }
             if (cppargs.debug) {
                 std::cout << std::fixed << std::setprecision(10)
-                          << (cppargs.mu_DH_diff_mode == 1 ? "[DEBUG DH_fd]" : "[DEBUG DH_unified]")
+                          << (cppargs.mu_DH_diff_mode == 1 ? "[DEBUG DH_fd]" : (cppargs.mu_DH_diff_mode == 2 ? "[DEBUG DH_ad]" : "[DEBUG DH_unified]"))
                           << " model=" << dh_model
                           << " eps=" << eps
                           << " kappa=" << kappa
@@ -2308,8 +2367,11 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             vector<double> dadx_born(ncomp, 0.0);
             vector<double> ion_part_vec(ncomp, 0.0);
             vector<double> eps_part_vec(ncomp, 0.0);
-            if (cppargs.born_diff_mode == 1) {
+            if (cppargs.mu_born_diff_mode == 1) {
                 dadx_born = compute_born_dadx_fd(t, x, cppargs, a_born);
+            }
+            else if (cppargs.mu_born_diff_mode == 2) {
+                dadx_born = compute_born_dadx_ad(t, x, cppargs);
             }
             else {
                 for (int i = 0; i < ncomp; i++) {
@@ -2347,7 +2409,7 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
                 mu_born[i] = a_born + Zborn + dadx_born[i] - sum_x_dadx_born;
             }
             if (cppargs.debug) {
-                if (cppargs.born_diff_mode == 1) {
+                if (cppargs.mu_born_diff_mode == 1) {
                     std::cout << std::fixed << std::setprecision(10)
                               << "[DEBUG born_model1_fd] eps=" << eps_born
                               << " born_sum=" << born_sum
@@ -2390,8 +2452,11 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
             vector<double> direct_part_vec(ncomp, 0.0);
             vector<double> deps_part_vec(ncomp, 0.0);
             vector<double> ddelta_part_vec(ncomp, 0.0);
-            if (cppargs.born_diff_mode == 1) {
+            if (cppargs.mu_born_diff_mode == 1) {
                 dadx_born = compute_born_dadx_fd(t, x, cppargs, a_born);
+            }
+            else if (cppargs.mu_born_diff_mode == 2) {
+                dadx_born = compute_born_dadx_ad(t, x, cppargs);
             }
             else {
                 const double inv_eps2 = 1.0/(eps_born*eps_born);
@@ -2428,7 +2493,7 @@ vector<double> pcsaft_lnfug_cpp(double t, double rho, vector<double> x, add_args
                 for (int i = 0; i < ncomp; i++) {
                     f_mix_dbg += x[i]*born.f_k[i];
                 }
-                if (cppargs.born_diff_mode == 1) {
+                if (cppargs.mu_born_diff_mode == 1) {
                     std::cout << std::fixed << std::setprecision(10)
                               << "[DEBUG born_model" << cppargs.born_model << "_fd] eps=" << eps_born
                               << " eps_ion=" << eps_r_ion
@@ -2985,7 +3050,7 @@ double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs
 }
 
 
-double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+static double pcsaft_dadt_analytical_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
     /**
     Calculate the temperature derivative of the residual Helmholtz energy at
     constant density.
@@ -3347,6 +3412,66 @@ double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs
 
     double dadt = dadt_hc + dadt_disp + dadt_assoc + dadt_polar + dadt_ion + dadt_born;
     return dadt;
+}
+
+
+double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+    /**
+    Calculate the temperature derivative of the residual Helmholtz energy at
+    constant density using the selected derivative mode.
+    */
+    if (cppargs.dadt_diff_mode == 0) {
+        return pcsaft_dadt_analytical_cpp(t, rho, x, cppargs);
+    }
+    if (cppargs.dadt_diff_mode == 1) {
+        return (pcsaft_ares_cpp(t + 1.0, rho, x, cppargs) - pcsaft_ares_cpp(t - 1.0, rho, x, cppargs)) / 2.0;
+    }
+    if (cppargs.dadt_diff_mode == 2) {
+        double dadt = pcsaft_autodiff::compute_residual_derivatives(t, rho, x, cppargs).dadt;
+        if (!std::isfinite(dadt)) {
+            throw ValueError("Non-finite autodiff dadt derivative.");
+        }
+        return dadt;
+    }
+    throw ValueError("Unknown dadt_differential_mode. Supported values are analytical/numerical/autodiff (0/1/2).");
+}
+
+vector<double> pcsaft_autodiff_dadx_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+    vector<double> value = pcsaft_autodiff::compute_residual_derivatives(t, rho, x, cppargs).dadx;
+    for (double v : value) {
+        if (!std::isfinite(v)) {
+            throw ValueError("Non-finite autodiff da/dx derivative.");
+        }
+    }
+    return value;
+}
+
+double pcsaft_autodiff_d2adt2_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+    double value = pcsaft_autodiff::compute_residual_derivatives(t, rho, x, cppargs).d2adt2;
+    if (!std::isfinite(value)) {
+        throw ValueError("Non-finite autodiff d2a/dT2 derivative.");
+    }
+    return value;
+}
+
+vector<double> pcsaft_autodiff_d2adtdx_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+    vector<double> value = pcsaft_autodiff::compute_residual_derivatives(t, rho, x, cppargs).d2adtdx;
+    for (double v : value) {
+        if (!std::isfinite(v)) {
+            throw ValueError("Non-finite autodiff mixed d2a/dTdx derivative.");
+        }
+    }
+    return value;
+}
+
+vector<double> pcsaft_autodiff_hessian_x_cpp(double t, double rho, vector<double> x, add_args &cppargs) {
+    vector<double> value = pcsaft_autodiff::compute_residual_derivatives(t, rho, x, cppargs).hessian_x;
+    for (double v : value) {
+        if (!std::isfinite(v)) {
+            throw ValueError("Non-finite autodiff Hessian derivative.");
+        }
+    }
+    return value;
 }
 
 
@@ -4598,4 +4723,17 @@ double BoundedSecantInner(double kb0, double Q, vector<double> u, vector<double>
     }
     return x3;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 

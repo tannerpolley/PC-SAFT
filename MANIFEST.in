@@ -4,6 +4,10 @@ include src/pcsaft/pcsaft.pyx
 include src/pcsaft/pcsaft.pxd
 include src/pcsaft/pcsaft_electrolyte.cpp
 include src/pcsaft/pcsaft_electrolyte.h
+include src/pcsaft/pcsaft_autodiff_helpers.h
 recursive-include src/pcsaft/data *.csv *.json
 graft externals/eigen/Eigen
+graft externals/autodiff/autodiff
+include externals/autodiff/LICENSE
 prune .cython_build
+

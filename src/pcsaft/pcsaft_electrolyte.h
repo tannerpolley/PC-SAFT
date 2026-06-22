@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vector>
 #include <string>
 
@@ -37,6 +39,7 @@ struct add_args {
     int disp_dadx_diff_mode;
     int assoc_dadx_diff_mode;
     int polar_dadx_diff_mode;
+    int dadt_diff_mode;
     int d_ion_mode;
     int mu_DH_diff_mode;
     int mu_DH_comp_dep_rel_perm;
@@ -72,6 +75,10 @@ double pcsaft_p_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_den_cpp(double t, double p, vector<double> x, int phase, add_args &cppargs);
 double pcsaft_ares_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_dadt_cpp(double t, double rho, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_autodiff_dadx_cpp(double t, double rho, vector<double> x, add_args &cppargs);
+double pcsaft_autodiff_d2adt2_cpp(double t, double rho, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_autodiff_d2adtdx_cpp(double t, double rho, vector<double> x, add_args &cppargs);
+vector<double> pcsaft_autodiff_hessian_x_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_hres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_sres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
 double pcsaft_gres_cpp(double t, double rho, vector<double> x, add_args &cppargs);
